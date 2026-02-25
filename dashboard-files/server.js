@@ -1033,8 +1033,8 @@ app.get('/oauth/start-codex', (req, res) => {
   const globalCmd = `openclaw onboard --auth-choice openai-codex`;
   const cmd = `(${globalCmd}) || (${localCmd})`;
 
+  let launchMsg = 'We opened the sign-in flow in Terminal.';
   let launched = false;
-  let error = null;
   try {
     if (process.platform === 'darwin') {
       const escaped = cmd.replace(/"/g, '\"');
@@ -1042,13 +1042,11 @@ app.get('/oauth/start-codex', (req, res) => {
       launched = true;
     }
   } catch (e) {
-    error = String(e.message || e);
+    launchMsg = 'Could not auto-open Terminal. Use the manual command below.';
   }
 
-  // No manual command wall page; redirect back to dashboard with status flags.
-  const q = new URLSearchParams({ oauth: 'codex', started: launched ? '1' : '0', profile });
-  if (error) q.set('oauthError', error.slice(0, 240));
-  return res.redirect(`/?${q.toString()}#auth`);
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.end(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>OpenAI Connect Helper</title><style>body{font-family:system-ui;background:#0f1115;color:#e7e9ee;padding:24px;max-width:820px;margin:0 auto}code{background:#1a1f2a;padding:4px 8px;border-radius:6px}a,button{color:#8ab4ff} .card{background:#161b22;border:1px solid #2d333b;border-radius:12px;padding:16px;margin:12px 0} .btn{display:inline-block;background:#1f6feb;color:#fff;padding:10px 14px;border-radius:8px;text-decoration:none;border:none;cursor:pointer}</style></head><body><h2>Connect OpenAI (Codex OAuth)</h2><div class="card"><p>${launchMsg}</p><ol><li>Go to the Terminal window that opened.</li><li>Complete the login prompts fully.</li><li>Come back here and click <b>I finished login</b>.</li></ol></div><div class="card"><p><b>Manual command (if no Terminal opened):</b></p><p><code>${cmd}</code></p></div><div class="card"><a class="btn" href="http://localhost:${PORT}/?tab=auth&oauth=codex&profile=${encodeURIComponent(profile)}#auth">I finished login</a> <a style="margin-left:10px" href="http://localhost:${PORT}">Back to Dashboard</a></div><p style="opacity:.8;font-size:12px">Profile: ${profile}. Auto-open terminal: ${launched ? 'yes' : 'no'}.</p></body></html>`);
 });
 
 

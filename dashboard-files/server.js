@@ -155,7 +155,20 @@ function saveChatHistory(rows) { writeJson(CHAT_HISTORY_PATH, rows); }
 
 function getProfileEnvStore() { return readJson(PROFILE_ENV_PATH, {}); }
 function saveProfileEnvStore(store) { writeJson(PROFILE_ENV_PATH, store); }
-function getProfileEnv(profileId) { const st=getProfileEnvStore(); return st[profileId] || {}; }
+function getProfileEnv(profileId) {
+  const st = getProfileEnvStore();
+  const raw = st[profileId] || {};
+  const cleaned = {};
+  for (const [k, v] of Object.entries(raw)) {
+    if (v && typeof v === 'object') {
+      if (Object.prototype.hasOwnProperty.call(v, 'value')) cleaned[k] = String(v.value ?? '');
+      else cleaned[k] = '';
+    } else {
+      cleaned[k] = String(v ?? '');
+    }
+  }
+  return cleaned;
+}
 
 
 async function gatewayState() {

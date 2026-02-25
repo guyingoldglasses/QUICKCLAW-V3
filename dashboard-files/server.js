@@ -948,13 +948,14 @@ app.all('/api/profiles/:id/*', (req, res) => {
 // Local helper page: launch real Codex OAuth in Terminal (interactive TTY)
 app.get('/oauth/start-codex', (req, res) => {
   const profile = String(req.query.profile || 'default');
-  const openclawBin = fs.existsSync(LOCAL_OPENCLAW) ? LOCAL_OPENCLAW : 'openclaw';
-  const cmd = `${openclawBin} onboard --auth-choice openai-codex`;
+  const localCmd = `${LOCAL_OPENCLAW} onboard --auth-choice openai-codex`;
+  const globalCmd = `openclaw onboard --auth-choice openai-codex`;
+  const cmd = `(${globalCmd}) || (${localCmd})`;
 
   let launchMsg = 'Opened OAuth command in Terminal.';
   try {
     if (process.platform === 'darwin') {
-      const escaped = cmd.replace(/"/g, '\"');
+      const escaped = cmd.replace(/"/g, '\\"');
       execSync(`osascript -e 'tell application "Terminal" to do script "${escaped}"'`, { stdio: 'ignore' });
     } else {
       launchMsg = `Run manually: ${cmd}`;
@@ -964,7 +965,7 @@ app.get('/oauth/start-codex', (req, res) => {
   }
 
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.end(`<!doctype html><html><head><meta charset="utf-8"><title>Codex OAuth</title><style>body{font-family:system-ui;background:#0f1115;color:#e7e9ee;padding:24px}code{background:#1a1f2a;padding:4px 8px;border-radius:6px}a{color:#8ab4ff}</style></head><body><h2>OpenAI Codex OAuth Helper</h2><p>${launchMsg}</p><p>Profile: <code>${profile}</code></p><ol><li>Complete login in Terminal window.</li><li>Return to dashboard Auth tab and click Refresh/Auth.</li></ol><p>Manual command:</p><p><code>${cmd}</code></p><p><a href="http://localhost:${PORT}">Back to Dashboard</a></p></body></html>`);
+  res.end(`<!doctype html><html><head><meta charset="utf-8"><title>Codex OAuth</title><style>body{font-family:system-ui;background:#0f1115;color:#e7e9ee;padding:24px}code{background:#1a1f2a;padding:4px 8px;border-radius:6px}a{color:#8ab4ff}</style></head><body><h2>OpenAI Codex OAuth Helper</h2><p>${launchMsg}</p><p>Profile: <code>${profile}</code></p><ol><li>Complete login in Terminal window.</li><li>If it says no provider plugins found, run <code>openclaw plugins doctor</code> and share output.</li><li>Return to dashboard Auth tab and click Refresh/Auth.</li></ol><p>Manual command:</p><p><code>${cmd}</code></p><p><a href="http://localhost:${PORT}">Back to Dashboard</a></p></body></html>`);
 });
 
 // API safety net: never return HTML for unknown /api routes (prevents client JSON parse failures)

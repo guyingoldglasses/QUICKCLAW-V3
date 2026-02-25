@@ -1,0 +1,9 @@
+const express=require('express');const{exec}=require('child_process');const fs=require('fs');const path=require('path');
+const app=express();const PORT=process.env.DASHBOARD_PORT||3000;const ROOT=process.env.QUICKCLAW_ROOT||path.resolve(__dirname,'..');const PID=path.join(ROOT,'.pids');const LOG=path.join(ROOT,'logs');const INSTALL=path.join(ROOT,'openclaw');for(const d of [PID,LOG])if(!fs.existsSync(d))fs.mkdirSync(d,{recursive:true});
+app.use(express.static(path.join(__dirname,'public')));app.use(express.json());
+function readPid(n){try{const p=parseInt(fs.readFileSync(path.join(PID,`${n}.pid`),'utf8'));process.kill(p,0);return p}catch{return null}}
+app.get('/api/status',(q,s)=>s.json({gateway:{running:!!readPid('gateway'),pid:readPid('gateway')},dashboard:{running:true,pid:process.pid,port:PORT},root:ROOT}));
+app.get('/api/log/:name',(q,s)=>{const n=q.params.name==='gateway'?'gateway.log':'dashboard.log';const p=path.join(LOG,n);s.type('text/plain').send(fs.existsSync(p)?fs.readFileSync(p,'utf8'):'');});
+app.post('/api/gateway/start',(q,s)=>{const cur=readPid('gateway');if(cur)return s.json({ok:true,message:'already running',pid:cur});let cmd='npx open-claw gateway start';const local=path.join(INSTALL,'node_modules','.bin','open-claw');if(fs.existsSync(local))cmd=`"${local}" gateway start`;const c=exec(`${cmd} >> "${path.join(LOG,'gateway.log')}" 2>&1`,{cwd:INSTALL});fs.writeFileSync(path.join(PID,'gateway.pid'),String(c.pid));c.unref();s.json({ok:true,pid:c.pid});});
+app.post('/api/gateway/stop',(q,s)=>{const p=readPid('gateway');if(!p)return s.json({ok:false,message:'not running'});try{process.kill(p,'SIGTERM')}catch{};try{fs.unlinkSync(path.join(PID,'gateway.pid'))}catch{};s.json({ok:true});});
+app.get('*',(q,s)=>s.sendFile(path.join(__dirname,'public','index.html')));app.listen(PORT,()=>console.log(`V3 dashboard at http://localhost:${PORT}`));

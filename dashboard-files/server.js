@@ -654,5 +654,35 @@ app.put('/api/dashboard/file', (req, res) => {
 });
 app.post('/api/dashboard/restart', (req, res) => res.json({ ok: true, message: 'Restart via QuickClaw_Launch.command recommended.' }));
 
+// Profile-level compatibility endpoints used by Command Center tabs
+app.get('/api/profiles/:id/env', (req, res) => res.json({ vars: [] }));
+app.get('/api/profiles/:id/config', (req, res) => {
+  const cfg = fs.existsSync(CONFIG_PATH) ? fs.readFileSync(CONFIG_PATH, 'utf8') : '';
+  res.json({ config: { path: CONFIG_PATH, raw: cfg } });
+});
+app.get('/api/profiles/:id/soul', (req, res) => {
+  const p = getProfiles().find(x => x.id === req.params.id);
+  res.json({ content: p?.soul || '' });
+});
+app.get('/api/profiles/:id/skills', (req, res) => res.json({ skills: getSkills() }));
+app.get('/api/profiles/:id/logs', (req, res) => res.json({ logs: tailFile('gateway.log', parseInt(req.query.lines || '150', 10)) }));
+app.get('/api/profiles/:id/models', (req, res) => res.json({ models: [{ id: 'default', name: 'default', enabled: true }] }));
+app.get('/api/profiles/:id/usage', (req, res) => res.json({ totals: { cost: 0, input: 0, output: 0 }, daily: [] }));
+app.get('/api/profiles/:id/channels', (req, res) => res.json({ channels: { telegram: { enabled: !!getSettings().telegramBotToken } } }));
+app.get('/api/profiles/:id/telegram/info', (req, res) => res.json({ enabled: !!getSettings().telegramBotToken, users: [] }));
+app.get('/api/profiles/:id/pairing', (req, res) => res.json({ code: null, status: 'idle' }));
+app.get('/api/profiles/:id/sessions', (req, res) => res.json({ sessions: [] }));
+app.get('/api/profiles/:id/cron', (req, res) => res.json({ jobs: [], output: 'No cron jobs configured yet.' }));
+app.get('/api/profiles/:id/activity', (req, res) => res.json({ events: [] }));
+app.get('/api/profiles/:id/ftp', (req, res) => res.json({ host: getSettings().ftpHost || '', user: getSettings().ftpUser || '', port: '21', hasCredentials: !!getSettings().ftpHost }));
+app.get('/api/profiles/:id/smtp', (req, res) => res.json({ host: '', port: '587', user: getSettings().emailUser || '', from: '', secure: true, hasCredentials: !!getSettings().emailUser }));
+app.get('/api/profiles/:id/auth', (req, res) => res.json({
+  openai: { oauthEnabled: !!getSettings().openaiOAuthEnabled, hasApiKey: !!getSettings().openaiApiKey },
+  anthropic: { hasApiKey: !!getSettings().anthropicApiKey }
+}));
+
+// Generic action handler so button posts don't fail
+app.post('/api/profiles/:id/:action', (req, res) => res.json({ ok: true, action: req.params.action, id: req.params.id }));
+
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 app.listen(PORT, () => console.log(`V3 dashboard at http://localhost:${PORT}`));

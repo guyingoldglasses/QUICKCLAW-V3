@@ -709,9 +709,15 @@ app.post('/api/profiles/:id/:action', (req, res) => res.json({ ok: true, action:
 
 // Auth/OAuth compatibility flows expected by Command Center
 app.post('/api/profiles/:id/auth/oauth/start', (req, res) => {
-  const clientId = req.body?.clientId || 'local-oauth-client';
-  const authUrl = `https://auth.openai.com/oauth/authorize?response_type=code&client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent('http://localhost:3000/oauth/callback')}&scope=openid%20profile%20email&state=quickclaw_${Date.now()}`;
-  res.json({ success: true, authUrl, clientId, callbackHint: 'After login, copy full callback URL from browser and paste into Complete Connection field.', note: 'If browser callback is blocked, run OAuth in Terminal with: openclaw models auth login --provider openai-codex' });
+  const profileId = req.params.id;
+  const authUrl = `http://localhost:${PORT}/oauth/start-codex?profile=${encodeURIComponent(profileId)}`;
+  res.json({
+    success: true,
+    authUrl,
+    clientId: 'openai-codex',
+    callbackHint: 'This opens a local helper page that launches real Codex OAuth in Terminal.',
+    note: 'Codex OAuth currently requires an interactive Terminal session.'
+  });
 });
 app.post('/api/profiles/:id/auth/oauth/complete', (req, res) => {
   res.json({ success: true, message: 'OAuth callback captured (local-mode simulated).' });
@@ -788,6 +794,29 @@ app.all('/api/profiles/:id/*', (req, res) => {
   if (sub.startsWith('channel/bluebubbles')) return res.json({ enabled: false });
 
   return res.json({ ok: true, note: 'profile endpoint stub', path: sub });
+});
+
+
+// Local helper page: launch real Codex OAuth in Terminal (interactive TTY)
+app.get('/oauth/start-codex', (req, res) => {
+  const profile = String(req.query.profile || 'default');
+  const openclawBin = fs.existsSync(LOCAL_OPENCLAW) ? LOCAL_OPENCLAW : 'openclaw';
+  const cmd = `${openclawBin} models auth login --provider openai-codex`;
+
+  let launchMsg = 'Opened OAuth command in Terminal.';
+  try {
+    if (process.platform === 'darwin') {
+      const escaped = cmd.replace(/"/g, '\"');
+      execSync(`osascript -e 'tell application "Terminal" to do script "${escaped}"'`, { stdio: 'ignore' });
+    } else {
+      launchMsg = `Run manually: ${cmd}`;
+    }
+  } catch (e) {
+    launchMsg = `Could not auto-open Terminal. Run manually: ${cmd}`;
+  }
+
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.end(`<!doctype html><html><head><meta charset="utf-8"><title>Codex OAuth</title><style>body{font-family:system-ui;background:#0f1115;color:#e7e9ee;padding:24px}code{background:#1a1f2a;padding:4px 8px;border-radius:6px}a{color:#8ab4ff}</style></head><body><h2>OpenAI Codex OAuth Helper</h2><p>${launchMsg}</p><p>Profile: <code>${profile}</code></p><ol><li>Complete login in Terminal window.</li><li>Return to dashboard Auth tab and click Refresh/Auth.</li></ol><p>Manual command:</p><p><code>${cmd}</code></p><p><a href="http://localhost:${PORT}">Back to Dashboard</a></p></body></html>`);
 });
 
 // API safety net: never return HTML for unknown /api routes (prevents client JSON parse failures)

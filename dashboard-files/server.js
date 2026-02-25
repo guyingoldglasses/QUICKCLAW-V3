@@ -18,6 +18,7 @@ const SKILLS_PATH = path.join(DATA_DIR, 'skills.json');
 const CONFIG_BACKUPS_DIR = path.join(DATA_DIR, 'config-backups');
 const ANTFARM_RUNS_PATH = path.join(DATA_DIR, 'antfarm-runs.json');
 const CHAT_HISTORY_PATH = path.join(DATA_DIR, 'chat-history.json');
+const PROFILE_ENV_PATH = path.join(DATA_DIR, 'profile-env.json');
 
 for (const d of [PID_DIR, LOG_DIR, DATA_DIR, CONFIG_BACKUPS_DIR]) if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
 
@@ -151,6 +152,10 @@ function saveAntfarmRuns(runs) { writeJson(ANTFARM_RUNS_PATH, runs); }
 
 function getChatHistory() { return readJson(CHAT_HISTORY_PATH, []); }
 function saveChatHistory(rows) { writeJson(CHAT_HISTORY_PATH, rows); }
+
+function getProfileEnvStore() { return readJson(PROFILE_ENV_PATH, {}); }
+function saveProfileEnvStore(store) { writeJson(PROFILE_ENV_PATH, store); }
+function getProfileEnv(profileId) { const st=getProfileEnvStore(); return st[profileId] || {}; }
 
 
 async function gatewayState() {
@@ -656,7 +661,50 @@ app.put('/api/dashboard/file', (req, res) => {
 app.post('/api/dashboard/restart', (req, res) => res.json({ ok: true, message: 'Restart via QuickClaw_Launch.command recommended.' }));
 
 // Profile-level compatibility endpoints used by Command Center tabs
-app.get('/api/profiles/:id/env', (req, res) => res.json({ vars: [] }));
+app.get('/api/profiles/:id/env', (req, res) => {
+  const profileId = req.params.id;
+  const varsObj = getProfileEnv(profileId);
+  const reveal = String(req.query.reveal || '').toLowerCase() === 'true';
+  const vars = Object.entries(varsObj).map(([key, value]) => ({
+    key,
+    value: reveal ? String(value) : (String(value).length > 8 ? String(value).slice(0,4) + '••••' + String(value).slice(-2) : '••••'),
+    isSecret: true
+  }));
+  res.json({ vars });
+});
+
+app.put('/api/profiles/:id/env', (req, res) => {
+  const profileId = req.params.id;
+  const key = String(req.body?.key || '').trim();
+  const value = String(req.body?.value || '');
+  if (!key) return res.status(400).json({ ok:false, error:'key is required' });
+  const st = getProfileEnvStore();
+  st[profileId] = st[profileId] || {};
+  st[profileId][key] = value;
+  saveProfileEnvStore(st);
+  res.json({ ok:true, key });
+});
+
+app.post('/api/profiles/:id/env', (req, res) => {
+  const profileId = req.params.id;
+  const key = String(req.body?.key || '').trim();
+  const value = String(req.body?.value || '');
+  if (!key) return res.status(400).json({ ok:false, error:'key is required' });
+  const st = getProfileEnvStore();
+  st[profileId] = st[profileId] || {};
+  st[profileId][key] = value;
+  saveProfileEnvStore(st);
+  res.json({ ok:true, key });
+});
+
+app.delete('/api/profiles/:id/env/:key', (req, res) => {
+  const profileId = req.params.id;
+  const key = String(req.params.key || '');
+  const st = getProfileEnvStore();
+  if (st[profileId]) delete st[profileId][key];
+  saveProfileEnvStore(st);
+  res.json({ ok:true });
+});
 app.get('/api/profiles/:id/config', (req, res) => {
   const cfg = fs.existsSync(CONFIG_PATH) ? fs.readFileSync(CONFIG_PATH, 'utf8') : '';
   res.json({ config: { path: CONFIG_PATH, raw: cfg } });
@@ -716,7 +764,7 @@ app.post('/api/profiles/:id/auth/oauth/start', (req, res) => {
     authUrl,
     clientId: 'openai-codex',
     callbackHint: 'This opens a local helper page that launches real Codex OAuth in Terminal.',
-    note: 'Codex OAuth currently requires an interactive Terminal session.'
+    note: 'Codex OAuth currently requires an interactive Terminal session. Dashboard launches it for you.'
   });
 });
 app.post('/api/profiles/:id/auth/oauth/complete', (req, res) => {
@@ -801,7 +849,7 @@ app.all('/api/profiles/:id/*', (req, res) => {
 app.get('/oauth/start-codex', (req, res) => {
   const profile = String(req.query.profile || 'default');
   const openclawBin = fs.existsSync(LOCAL_OPENCLAW) ? LOCAL_OPENCLAW : 'openclaw';
-  const cmd = `${openclawBin} models auth login --provider openai-codex`;
+  const cmd = `${openclawBin} onboard --auth-choice openai-codex`;
 
   let launchMsg = 'Opened OAuth command in Terminal.';
   try {

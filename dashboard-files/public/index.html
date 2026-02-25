@@ -38,6 +38,8 @@
     </div>
   </div>
 
+  <div id="modeBanner"></div>
+  <div id="toast" class="toast hidden"></div>
   <div class="tabs" id="tabs"></div>
 
   <section id="tab-overview" class="tabpane"></section>
@@ -61,6 +63,12 @@ const API_BASE = (location.protocol === 'http:' || location.protocol === 'https:
 async function j(u,o){const r=await fetch(`${API_BASE}${u}`,o);return r.json();}
 async function txt(u){const r=await fetch(`${API_BASE}${u}`);return r.text();}
 const esc=s=>String(s||'').replace(/[&<>]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[m]));
+function showToast(msg){const el=document.getElementById('toast'); el.textContent=msg; el.classList.remove('hidden'); setTimeout(()=>el.classList.add('hidden'),2400);}
+function showBanner(){
+  const el=document.getElementById('modeBanner');
+  if(location.protocol==='file:') el.innerHTML='<div class="banner"><b>File mode detected.</b> Dashboard is using <code>http://localhost:3000/api</code> fallback. For best results, open the printed localhost URL from Launch.</div>';
+  else el.innerHTML='';
+}
 function addonPill(name,val){const c=val==='missing'?'bad':'ok';return `<span class="pill ${c}">${name}: ${val}</span>`;}
 
 function renderTabs(){
@@ -80,7 +88,7 @@ async function renderTab(tab){
   try{ await fn(); }
   catch(err){
     const pane=document.getElementById('tab-'+tab);
-    if(pane) pane.innerHTML=`<div class="card"><b>Render error in ${tab}</b><pre>${esc(err?.message||String(err))}</pre></div>`;
+    if(pane) pane.innerHTML=`<div class="card"><b>Render error in ${tab}</b><pre>${esc(err?.message||String(err))}</pre></div>`; showToast(`Render error in ${tab}`);
   }
 }
 
@@ -192,16 +200,16 @@ async function activateSelectedProfile(){const id=document.getElementById('profi
 async function renameProfile(){const id=document.getElementById('profilesSelect')?.value; const name=document.getElementById('renameProfileName')?.value?.trim(); if(!id||!name)return; await j('/api/profiles/rename',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,name})}); await renderProfiles();}
 async function deleteProfile(){const id=document.getElementById('profilesSelect')?.value; if(!id)return; if(!confirm('Delete selected profile?'))return; await j('/api/profiles/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})}); await renderProfiles();}
 
-async function saveSettings(){const payload={}; payload.openaiApiKey=document.getElementById('openaiApiKey')?.value||''; payload.openaiOAuthEnabled=!!document.getElementById('openaiOAuthEnabled')?.checked; payload.anthropicApiKey=document.getElementById('anthropicApiKey')?.value||''; payload.telegramBotToken=document.getElementById('telegramBotToken')?.value||''; payload.ftpHost=document.getElementById('ftpHost')?.value||''; payload.ftpUser=document.getElementById('ftpUser')?.value||''; payload.emailUser=document.getElementById('emailUser')?.value||''; await j('/api/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});} 
-async function applySettingsToConfig(){await j('/api/settings/apply-config',{method:'POST'}); await renderConfig(); await renderOverview();}
-async function importSettings(){try{const v=JSON.parse(document.getElementById('importJson').value||'{}'); await j('/api/settings/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(v)}); await renderIntegrations();}catch(e){alert('Invalid JSON');}}
+async function saveSettings(){const payload={}; payload.openaiApiKey=document.getElementById('openaiApiKey')?.value||''; payload.openaiOAuthEnabled=!!document.getElementById('openaiOAuthEnabled')?.checked; payload.anthropicApiKey=document.getElementById('anthropicApiKey')?.value||''; payload.telegramBotToken=document.getElementById('telegramBotToken')?.value||''; payload.ftpHost=document.getElementById('ftpHost')?.value||''; payload.ftpUser=document.getElementById('ftpUser')?.value||''; payload.emailUser=document.getElementById('emailUser')?.value||''; await j('/api/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}); showToast('Settings saved');} 
+async function applySettingsToConfig(){const r=await j('/api/settings/apply-config',{method:'POST'}); await renderConfig(); await renderOverview(); showToast(r.backup?'Config applied + backup created':'Config applied');}
+async function importSettings(){try{const v=JSON.parse(document.getElementById('importJson').value||'{}'); await j('/api/settings/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(v)}); await renderIntegrations(); showToast('Settings imported');}catch(e){alert('Invalid JSON');}}
 
 async function installSkill(id){await j('/api/skills/install',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})}); await renderSkills();}
 async function toggleSkill(id,enabled){await j('/api/skills/toggle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,enabled})}); await renderSkills();}
 
 async function reloadBrowse(){await renderSystem();}
 async function readSelectedFile(){const p=document.getElementById('browseSelect')?.value; if(!p)return; const r=await j('/api/system/readfile?path='+encodeURIComponent(p)); document.getElementById('filePreview').textContent=r.ok?(r.content||'(empty)'):('Error: '+r.error);}
-async function restoreBackup(){const file=document.getElementById('backupSelect')?.value; if(!file)return; await j('/api/config/restore',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({file})}); await renderConfig();}
+async function restoreBackup(){const file=document.getElementById('backupSelect')?.value; if(!file)return; if(!confirm('Restore this backup?')) return; await j('/api/config/restore',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({file})}); await renderConfig(); showToast('Config restored');}
 async function securityFix(){const r=await j('/api/security/fix',{method:'POST'}); alert(r.message||'done'); await renderSecurity();}
 
 async function copyRoot(){if(LAST.root)await navigator.clipboard.writeText(LAST.root);} 

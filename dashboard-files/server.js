@@ -684,5 +684,29 @@ app.get('/api/profiles/:id/auth', (req, res) => res.json({
 // Generic action handler so button posts don't fail
 app.post('/api/profiles/:id/:action', (req, res) => res.json({ ok: true, action: req.params.action, id: req.params.id }));
 
+
+// Final safety-net for any remaining profile sub-endpoint requests from Command Center UI
+app.all('/api/profiles/:id/*', (req, res) => {
+  const sub = req.params[0] || '';
+
+  // Return best-effort shapes so tabs do not hard-fail with 404
+  if (sub.startsWith('files')) return res.json({ files: [], dir: null });
+  if (sub.startsWith('history')) return res.json({ items: [], sessions: [] });
+  if (sub.startsWith('memory')) return res.json({ items: [] });
+  if (sub.startsWith('keys')) return res.json({ keys: [] });
+  if (sub.startsWith('models')) return res.json({ models: [{ id: 'default', name: 'default', enabled: true }] });
+  if (sub.startsWith('usage')) return res.json({ totals: { cost: 0, input: 0, output: 0 }, daily: [] });
+  if (sub.startsWith('config')) return res.json({ config: {} });
+  if (sub.startsWith('soul')) return res.json({ content: '' });
+  if (sub.startsWith('skills')) return res.json({ skills: getSkills() });
+  if (sub.startsWith('logs')) return res.json({ logs: '' });
+  if (sub.startsWith('auth')) return res.json({ openai: { oauthEnabled: false, hasApiKey: false } });
+  if (sub.startsWith('channel/discord')) return res.json({ enabled: false });
+  if (sub.startsWith('channel/whatsapp')) return res.json({ enabled: false });
+  if (sub.startsWith('channel/bluebubbles')) return res.json({ enabled: false });
+
+  return res.json({ ok: true, note: 'profile endpoint stub', path: sub });
+});
+
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 app.listen(PORT, () => console.log(`V3 dashboard at http://localhost:${PORT}`));

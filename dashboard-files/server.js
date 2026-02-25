@@ -842,11 +842,13 @@ app.get('/api/profiles/:id/ftp', (req, res) => res.json({ host: getSettings().ft
 app.get('/api/profiles/:id/smtp', (req, res) => res.json({ host: '', port: '587', user: getSettings().emailUser || '', from: '', secure: true, hasCredentials: !!getSettings().emailUser }));
 app.get('/api/profiles/:id/auth', (req, res) => {
   const st = getSettings();
+  const oauthValid = !!st.openaiOAuthEnabled;
   res.json({
-    method: st.openaiOAuthEnabled ? 'codex-oauth' : (st.openaiApiKey ? 'api-key' : 'none'),
-    oauthValid: !!st.openaiOAuthEnabled,
-    oauthExpiry: null,
-    openai: { oauthEnabled: !!st.openaiOAuthEnabled, hasApiKey: !!st.openaiApiKey },
+    method: oauthValid ? 'codex-oauth' : (st.openaiApiKey ? 'api-key' : 'none'),
+    oauthValid,
+    oauthExpiry: st.openaiOAuthExpiry || null,
+    oauthConnectedAt: st.openaiOAuthConnectedAt || null,
+    openai: { oauthEnabled: oauthValid, hasApiKey: !!st.openaiApiKey },
     anthropic: { hasApiKey: !!st.anthropicApiKey }
   });
 });
@@ -858,17 +860,58 @@ app.post('/api/profiles/:id/:action', (req, res) => res.json({ ok: true, action:
 // Auth/OAuth compatibility flows expected by Command Center
 app.post('/api/profiles/:id/auth/oauth/start', (req, res) => {
   const profileId = req.params.id;
+  const settings = getSettings();
+  const clientId = String(req.body?.clientId || settings.openaiOAuthClientId || process.env.OPENAI_OAUTH_CLIENT_ID || '').trim();
+
+  // If client id exists, provide direct browser auth URL for callback paste flow.
+  if (clientId) {
+    const redirectUri = `http://localhost:${PORT}/oauth/callback`;
+    const state = `quickclaw_${Date.now()}`;
+    const authUrl = `https://auth.openai.com/oauth/authorize?response_type=code&client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=openid%20profile%20email&state=${encodeURIComponent(state)}`;
+    saveSettings({ openaiOAuthClientId: clientId, openaiOAuthLastState: state });
+    return res.json({
+      success: true,
+      authUrl,
+      clientId,
+      callbackHint: 'After login, copy the full localhost callback URL and paste into Complete Connection.',
+      note: 'If browser auth fails, use helper mode (Terminal onboarding).'
+    });
+  }
+
+  // Fallback helper mode (Terminal) when no client id is configured.
   const authUrl = `http://localhost:${PORT}/oauth/start-codex?profile=${encodeURIComponent(profileId)}`;
-  res.json({
+  return res.json({
     success: true,
     authUrl,
-    clientId: 'openai-codex',
-    callbackHint: 'This opens a local helper page that launches real Codex OAuth in Terminal.',
-    note: 'Codex OAuth currently requires an interactive Terminal session. Dashboard launches it for you.'
+    clientId: null,
+    callbackHint: 'No client id configured. Helper mode will launch onboarding in Terminal.',
+    note: 'Add OAuth Client ID to use browser callback mode.'
   });
 });
 app.post('/api/profiles/:id/auth/oauth/complete', (req, res) => {
-  res.json({ success: true, message: 'OAuth callback captured (local-mode simulated).' });
+  const callbackUrl = String(req.body?.callbackUrl || '').trim();
+  if (!callbackUrl) return res.json({ success: false, error: 'Callback URL is required.' });
+
+  try {
+    const u = new URL(callbackUrl);
+    const code = u.searchParams.get('code') || '';
+    const state = u.searchParams.get('state') || '';
+    if (!code) return res.json({ success: false, error: 'No authorization code found in callback URL.' });
+
+    saveSettings({
+      openaiOAuthEnabled: true,
+      openaiOAuthConnectedAt: new Date().toISOString(),
+      openaiOAuthLastCode: String(code).slice(0, 8),
+      openaiOAuthLastState: state || getSettings().openaiOAuthLastState || ''
+    });
+
+    const skills = getSkills().map(x => x.id === 'openai-auth' ? { ...x, installed: true, enabled: true } : x);
+    saveSkills(skills);
+
+    return res.json({ success: true, message: 'OAuth callback accepted. OpenAI Codex marked connected for this profile.' });
+  } catch (e) {
+    return res.json({ success: false, error: 'Invalid callback URL format.' });
+  }
 });
 app.post('/api/profiles/:id/auth/oauth/manual', (req, res) => {
   const hasToken = !!String(req.body?.accessToken || '').trim();
@@ -878,8 +921,8 @@ app.post('/api/profiles/:id/auth/oauth/manual', (req, res) => {
 });
 app.post('/api/profiles/:id/auth/oauth/cancel', (req, res) => res.json({ success: true }));
 app.post('/api/profiles/:id/auth/oauth/revoke', (req, res) => {
-  saveSettings({ openaiOAuthEnabled: false });
-  res.json({ success: true, message: 'OAuth revoked in local-mode.' });
+  saveSettings({ openaiOAuthEnabled: false, openaiOAuthConnectedAt: null, openaiOAuthLastCode: null });
+  res.json({ success: true, message: 'OAuth revoked.' });
 });
 app.post('/api/profiles/:id/auth/oauth/share', (req, res) => res.json({ success: true, message: 'OAuth sharing simulated in local-mode.' }));
 app.post('/api/profiles/:id/auth/toggle', (req, res) => {

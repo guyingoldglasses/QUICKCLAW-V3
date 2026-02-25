@@ -211,6 +211,21 @@ function backupCurrentConfig() {
   return dst;
 }
 
+
+function openclawConfigPath() {
+  return path.join(process.env.HOME || require('os').homedir(), '.openclaw', 'openclaw.json');
+}
+function writeOpenclawTelegramToken(token) {
+  const p = openclawConfigPath();
+  if (!fs.existsSync(p)) return { ok: false, error: `Config not found: ${p}` };
+  const cfg = JSON.parse(fs.readFileSync(p, 'utf8'));
+  cfg.channels = cfg.channels || {};
+  cfg.channels.telegram = cfg.channels.telegram || {};
+  cfg.channels.telegram.botToken = token;
+  fs.writeFileSync(p, JSON.stringify(cfg, null, 2));
+  return { ok: true, path: p };
+}
+
 function applySettingsToConfigFile() {
   const s = getSettings();
   const backup = backupCurrentConfig();
@@ -973,8 +988,19 @@ app.post('/api/profiles/:id/auth/toggle', (req, res) => {
 app.put('/api/profiles/:id/telegram/setup', (req, res) => {
   const botToken = String(req.body?.botToken || '').trim();
   if (!botToken || !botToken.includes(':')) return res.status(400).json({ ok: false, error: 'Invalid bot token format' });
+
+  // Dashboard-local settings
   saveSettings({ telegramBotToken: botToken });
-  res.json({ ok: true, message: 'Telegram bot token saved.', instructions: 'Create bot via @BotFather, add bot to chat, send /start.' });
+
+  // Real OpenClaw runtime config
+  const sync = writeOpenclawTelegramToken(botToken);
+
+  res.json({
+    ok: true,
+    message: 'Telegram bot token saved to dashboard + OpenClaw config.',
+    sync,
+    instructions: 'Restart gateway, then message your bot with /start.'
+  });
 });
 app.post('/api/profiles/:id/telegram/users/add', (req, res) => res.json({ ok: true, message: 'User allowed.' }));
 app.delete('/api/profiles/:id/telegram/users/:uid', (req, res) => res.json({ ok: true, message: 'User removed.' }));

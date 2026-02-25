@@ -668,28 +668,40 @@ app.get('/api/profiles/:id/soul', (req, res) => {
 app.get('/api/profiles/:id/skills', (req, res) => res.json({ skills: getSkills() }));
 app.get('/api/profiles/:id/logs', (req, res) => res.json({ logs: tailFile('gateway.log', parseInt(req.query.lines || '150', 10)) }));
 app.get('/api/profiles/:id/models', (req, res) => res.json({ models: [{ id: 'default', name: 'default', enabled: true }] }));
-app.get('/api/profiles/:id/usage', (req, res) => res.json({ totals: { cost: 0, input: 0, output: 0 }, daily: [] }));
+app.get('/api/profiles/:id/usage', (req, res) => res.json({ totals: { cost: 0, input: 0, output: 0 }, byModel: {}, byDay: [], noData: true, topSessions: [], raw: {} }));
 app.get('/api/profiles/:id/channels', (req, res) => res.json({ channels: { telegram: { enabled: !!getSettings().telegramBotToken } } }));
-app.get('/api/profiles/:id/telegram/info', (req, res) => res.json({
-  enabled: !!getSettings().telegramBotToken,
-  users: [],
-  instructions: [
-    '1) Open @BotFather in Telegram.',
-    '2) Create bot with /newbot and copy token.',
-    '3) Paste token in Comms → Telegram and Save.',
-    '4) Add bot to your chat and send /start.'
-  ]
-}));
+app.get('/api/profiles/:id/telegram/info', (req, res) => {
+  const token = String(getSettings().telegramBotToken || '');
+  const masked = token ? token.slice(0, 8) + '...' + token.slice(-6) : '';
+  res.json({
+    enabled: !!token,
+    hasToken: !!token,
+    botToken: masked,
+    users: [],
+    instructions: [
+      '1) Open @BotFather in Telegram.',
+      '2) Create bot with /newbot and copy token.',
+      '3) Paste token in Comms → Telegram and click Save & Restart.',
+      '4) Add your user id to approved users and send /start to bot.'
+    ]
+  });
+});
 app.get('/api/profiles/:id/pairing', (req, res) => res.json({ code: null, status: 'idle' }));
 app.get('/api/profiles/:id/sessions', (req, res) => res.json({ sessions: [] }));
 app.get('/api/profiles/:id/cron', (req, res) => res.json({ jobs: [], output: 'No cron jobs configured yet.' }));
 app.get('/api/profiles/:id/activity', (req, res) => res.json({ events: [] }));
 app.get('/api/profiles/:id/ftp', (req, res) => res.json({ host: getSettings().ftpHost || '', user: getSettings().ftpUser || '', port: '21', hasCredentials: !!getSettings().ftpHost }));
 app.get('/api/profiles/:id/smtp', (req, res) => res.json({ host: '', port: '587', user: getSettings().emailUser || '', from: '', secure: true, hasCredentials: !!getSettings().emailUser }));
-app.get('/api/profiles/:id/auth', (req, res) => res.json({
-  openai: { oauthEnabled: !!getSettings().openaiOAuthEnabled, hasApiKey: !!getSettings().openaiApiKey },
-  anthropic: { hasApiKey: !!getSettings().anthropicApiKey }
-}));
+app.get('/api/profiles/:id/auth', (req, res) => {
+  const st = getSettings();
+  res.json({
+    method: st.openaiOAuthEnabled ? 'codex-oauth' : (st.openaiApiKey ? 'api-key' : 'none'),
+    oauthValid: !!st.openaiOAuthEnabled,
+    oauthExpiry: null,
+    openai: { oauthEnabled: !!st.openaiOAuthEnabled, hasApiKey: !!st.openaiApiKey },
+    anthropic: { hasApiKey: !!st.anthropicApiKey }
+  });
+});
 
 // Generic action handler so button posts don't fail
 app.post('/api/profiles/:id/:action', (req, res) => res.json({ ok: true, action: req.params.action, id: req.params.id }));
@@ -698,8 +710,8 @@ app.post('/api/profiles/:id/:action', (req, res) => res.json({ ok: true, action:
 // Auth/OAuth compatibility flows expected by Command Center
 app.post('/api/profiles/:id/auth/oauth/start', (req, res) => {
   const clientId = req.body?.clientId || 'local-oauth-client';
-  const authUrl = `https://platform.openai.com/settings/organization/api-keys`;
-  res.json({ success: true, authUrl, clientId, note: 'OpenAI OAuth helper: create/copy key from OpenAI page, then paste in Integrations/Auth.' });
+  const authUrl = `https://auth.openai.com/oauth/authorize?response_type=code&client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent('http://localhost:3000/oauth/callback')}&scope=openid%20profile%20email&state=quickclaw_${Date.now()}`;
+  res.json({ success: true, authUrl, clientId, callbackHint: 'After login, copy full callback URL from browser and paste into Complete Connection field.' });
 });
 app.post('/api/profiles/:id/auth/oauth/complete', (req, res) => {
   res.json({ success: true, message: 'OAuth callback captured (local-mode simulated).' });
@@ -731,16 +743,22 @@ app.put('/api/profiles/:id/telegram/setup', (req, res) => {
 });
 app.post('/api/profiles/:id/telegram/users/add', (req, res) => res.json({ ok: true, message: 'User allowed.' }));
 app.delete('/api/profiles/:id/telegram/users/:uid', (req, res) => res.json({ ok: true, message: 'User removed.' }));
-app.get('/api/profiles/:id/telegram/info', (req, res) => res.json({
-  enabled: !!getSettings().telegramBotToken,
-  users: [],
-  instructions: [
-    '1) Open @BotFather in Telegram.',
-    '2) Create bot with /newbot and copy token.',
-    '3) Paste token in Comms → Telegram and Save.',
-    '4) Add bot to your chat and send /start.'
-  ]
-}));
+app.get('/api/profiles/:id/telegram/info', (req, res) => {
+  const token = String(getSettings().telegramBotToken || '');
+  const masked = token ? token.slice(0, 8) + '...' + token.slice(-6) : '';
+  res.json({
+    enabled: !!token,
+    hasToken: !!token,
+    botToken: masked,
+    users: [],
+    instructions: [
+      '1) Open @BotFather in Telegram.',
+      '2) Create bot with /newbot and copy token.',
+      '3) Paste token in Comms → Telegram and click Save & Restart.',
+      '4) Add your user id to approved users and send /start to bot.'
+    ]
+  });
+});
 
 // Channel config setters
 app.put('/api/profiles/:id/channel/discord', (req, res) => res.json({ ok: true, enabled: !!req.body?.enabled }));

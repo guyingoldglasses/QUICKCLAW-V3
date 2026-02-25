@@ -711,7 +711,7 @@ app.post('/api/profiles/:id/:action', (req, res) => res.json({ ok: true, action:
 app.post('/api/profiles/:id/auth/oauth/start', (req, res) => {
   const clientId = req.body?.clientId || 'local-oauth-client';
   const authUrl = `https://auth.openai.com/oauth/authorize?response_type=code&client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent('http://localhost:3000/oauth/callback')}&scope=openid%20profile%20email&state=quickclaw_${Date.now()}`;
-  res.json({ success: true, authUrl, clientId, callbackHint: 'After login, copy full callback URL from browser and paste into Complete Connection field.' });
+  res.json({ success: true, authUrl, clientId, callbackHint: 'After login, copy full callback URL from browser and paste into Complete Connection field.', note: 'If browser callback is blocked, run OAuth in Terminal with: openclaw models auth login --provider openai-codex' });
 });
 app.post('/api/profiles/:id/auth/oauth/complete', (req, res) => {
   res.json({ success: true, message: 'OAuth callback captured (local-mode simulated).' });
@@ -777,7 +777,7 @@ app.all('/api/profiles/:id/*', (req, res) => {
   if (sub.startsWith('memory')) return res.json({ items: [] });
   if (sub.startsWith('keys')) return res.json({ keys: [] });
   if (sub.startsWith('models')) return res.json({ models: [{ id: 'default', name: 'default', enabled: true }] });
-  if (sub.startsWith('usage')) return res.json({ totals: { cost: 0, input: 0, output: 0 }, daily: [] });
+  if (sub.startsWith('usage')) return res.json({ totals: { cost: 0, input: 0, output: 0 }, byModel: {}, byDay: [], noData: true, topSessions: [], raw: {} });
   if (sub.startsWith('config')) return res.json({ config: {} });
   if (sub.startsWith('soul')) return res.json({ content: '' });
   if (sub.startsWith('skills')) return res.json({ skills: getSkills() });

@@ -22,6 +22,8 @@
     pre{background:#0a0f15;border:1px solid var(--line);border-radius:8px;padding:10px;max-height:280px;overflow:auto;white-space:pre-wrap}
     .ok{color:var(--ok)} .bad{color:var(--bad)} .muted{color:var(--muted)} .pill{display:inline-block;padding:3px 8px;border:1px solid #344054;border-radius:999px;font-size:12px;margin:0 6px 6px 0}
     .hidden{display:none}
+    .break{overflow-wrap:anywhere;word-break:break-word}
+    select{max-width:100%}
     @media (max-width:700px){.wrap{padding:10px}.card{padding:12px}.top h2{font-size:18px}}
   </style>
 </head>
@@ -63,7 +65,23 @@ function addonPill(name,val){const c=val==='missing'?'bad':'ok';return `<span cl
 function renderTabs(){
   document.getElementById('tabs').innerHTML=tabs.map(t=>`<button class="tab ${t===currentTab?'active':''}" onclick="setTab('${t}')">${t[0].toUpperCase()+t.slice(1)}</button>`).join('');
 }
-function setTab(tab){currentTab=tab; renderTabs(); tabs.forEach(t=>document.getElementById('tab-'+t).classList.toggle('hidden',t!==tab));}
+async function setTab(tab){
+  currentTab=tab;
+  renderTabs();
+  tabs.forEach(t=>document.getElementById('tab-'+t).classList.toggle('hidden',t!==tab));
+  await renderTab(tab);
+}
+
+async function renderTab(tab){
+  const map={overview:renderOverview,profiles:renderProfiles,integrations:renderIntegrations,skills:renderSkills,system:renderSystem,security:renderSecurity,logs:renderLogs,config:renderConfig,activity:renderActivity};
+  const fn=map[tab];
+  if(!fn) return;
+  try{ await fn(); }
+  catch(err){
+    const pane=document.getElementById('tab-'+tab);
+    if(pane) pane.innerHTML=`<div class="card"><b>Render error in ${tab}</b><pre>${esc(err?.message||String(err))}</pre></div>`;
+  }
+}
 
 async function renderOverview(){
   const s=await j('/api/status'); LAST.root=s.root||''; LAST.config=s.configPath||'';
@@ -71,8 +89,8 @@ async function renderOverview(){
     <div class="card"><div class="grid">
       <div><div class="stat">Gateway</div><div class="big ${s.gateway.running?'ok':'bad'}">${s.gateway.running?'RUNNING':'STOPPED'}</div><div class="muted">WS 18789: ${s.gateway.ws18789?'YES':'NO'} | Port 5000: ${s.gateway.port5000?'YES':'NO'}</div></div>
       <div><div class="stat">Dashboard</div><div class="big ok">RUNNING</div><div class="muted">PID ${s.dashboard.pid||'-'} Port ${s.dashboard.port}</div></div>
-      <div><div class="stat">Root</div><div class="muted">${esc(s.root)}</div></div>
-      <div><div class="stat">Config</div><div class="muted">${s.configExists?'Found':'Missing'}<br>${esc(s.configPath||'')}</div></div>
+      <div><div class="stat">Root</div><div class="muted break">${esc(s.root)}</div></div>
+      <div><div class="stat">Config</div><div class="muted break">${s.configExists?'Found':'Missing'}<br>${esc(s.configPath||'')}</div></div>
     </div>
     <div class="row" style="margin-top:10px">
       <button onclick="startGw()">Start Gateway</button>
@@ -188,9 +206,13 @@ async function securityFix(){const r=await j('/api/security/fix',{method:'POST'}
 async function copyRoot(){if(LAST.root)await navigator.clipboard.writeText(LAST.root);} 
 async function copyConfig(){if(LAST.config)await navigator.clipboard.writeText(LAST.config);} 
 
-async function refreshAll(){await renderOverview();await renderProfiles();await renderIntegrations();await renderSkills();await renderSystem();await renderSecurity();await renderLogs();await renderConfig();await renderActivity();}
+async function refreshAll(){
+  for (const t of tabs){
+    await renderTab(t);
+  }
+}
 
-renderTabs(); setTab('overview'); refreshAll();
+renderTabs(); setTab('overview');
 </script>
 </body>
 </html>

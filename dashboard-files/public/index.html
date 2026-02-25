@@ -53,11 +53,12 @@
   <section id="tab-logs" class="tabpane hidden"></section>
   <section id="tab-config" class="tabpane hidden"></section>
   <section id="tab-activity" class="tabpane hidden"></section>
+  <section id="tab-chat" class="tabpane hidden"></section>
 </div>
 
 <script>
 let LAST={root:'',config:''};
-const tabs=['overview','profiles','integrations','skills','antfarm','memory','system','security','logs','config','activity'];
+const tabs=['overview','profiles','integrations','skills','antfarm','memory','system','security','logs','config','activity','chat'];
 let currentTab='overview';
 const fields=['openaiApiKey','openaiOAuthEnabled','anthropicApiKey','telegramBotToken','ftpHost','ftpUser','emailUser'];
 
@@ -100,7 +101,7 @@ async function setTab(tab){
 }
 
 async function renderTab(tab){
-  const map={overview:renderOverview,profiles:renderProfiles,integrations:renderIntegrations,skills:renderSkills,antfarm:renderAntfarm,memory:renderMemory,system:renderSystem,security:renderSecurity,logs:renderLogs,config:renderConfig,activity:renderActivity};
+  const map={overview:renderOverview,profiles:renderProfiles,integrations:renderIntegrations,skills:renderSkills,antfarm:renderAntfarm,memory:renderMemory,system:renderSystem,security:renderSecurity,logs:renderLogs,config:renderConfig,activity:renderActivity,chat:renderChat};
   const fn=map[tab];
   if(!fn) return;
   try{ await fn(); }
@@ -162,6 +163,7 @@ async function renderIntegrations(){
     </div>
     <div class="row" style="margin-top:10px">
       <button onclick="saveSettings()">Save Settings</button>
+      <button onclick="quickConnectOpenAI()">Quick Connect OpenAI</button>
       <button onclick="applySettingsToConfig()">Apply Settings To Config</button>
       <button onclick="exportSettings()">Export Settings</button>
     </div></div>
@@ -198,10 +200,33 @@ async function renderAntfarm(){
 
 async function renderMemory(){
   const r=await j('/api/memory/files');
-  const opts=(r.files||[]).map(f=>`<option value="${esc(f)}">${esc(f)}</option>`).join('');
+  const files=r.files||[];
+  const opts=files.map(f=>`<option value="${esc(f)}">${esc(f)}</option>`).join('');
   document.getElementById('tab-memory').innerHTML=`
-    <div class="card"><b>Memory Files</b><div class="row" style="margin-top:8px"><select id="memorySelect" style="min-width:380px">${opts}</select><button onclick="loadMemoryFile()">Load</button><button onclick="saveMemoryFile()">Save</button></div>
-    <textarea id="memoryContent" rows="16" style="width:100%;margin-top:8px"></textarea></div>`;
+    <div class="card"><b>Memory Files</b>
+      <div class="row" style="margin-top:8px">
+        <select id="memorySelect" style="min-width:380px">${opts}</select>
+        <button onclick="loadMemoryFile()">Load</button>
+        <button onclick="saveMemoryFile()">Save</button>
+        <button onclick="exportMemory()">Export Memory</button>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <input id="newMemoryName" placeholder="new-memory-file-name" style="min-width:260px">
+        <button onclick="createMemoryFile()">Create File</button>
+      </div>
+      ${files.length? '' : '<div class="muted" style="margin-top:8px">No memory files yet. Create your first one.</div>'}
+      <textarea id="memoryContent" rows="16" style="width:100%;margin-top:8px"></textarea>
+    </div>`;
+}
+
+async function renderChat(){
+  const h=await j('/api/chat/history');
+  const msgs=(h.messages||[]).slice(-30).map(m=>`[${m.role}] ${m.text}`).join('\n') || '(no chat history yet)';
+  document.getElementById('tab-chat').innerHTML=`
+    <div class="card"><b>Assistant Chat Console</b>
+      <div class="row" style="margin-top:8px"><input id="chatInput" placeholder="Type command or idea" style="min-width:360px"><button onclick="sendChat()">Send</button></div>
+      <pre id="chatLog" style="margin-top:8px">${esc(msgs)}</pre>
+    </div>`;
 }
 
 async function renderSystem(){

@@ -17,6 +17,7 @@ const SETTINGS_PATH = path.join(DATA_DIR, 'settings.json');
 const SKILLS_PATH = path.join(DATA_DIR, 'skills.json');
 const CONFIG_BACKUPS_DIR = path.join(DATA_DIR, 'config-backups');
 const ANTFARM_RUNS_PATH = path.join(DATA_DIR, 'antfarm-runs.json');
+const CHAT_HISTORY_PATH = path.join(DATA_DIR, 'chat-history.json');
 
 for (const d of [PID_DIR, LOG_DIR, DATA_DIR, CONFIG_BACKUPS_DIR]) if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
 
@@ -138,6 +139,9 @@ function saveSkills(list) { writeJson(SKILLS_PATH, list); }
 
 function getAntfarmRuns() { return readJson(ANTFARM_RUNS_PATH, []); }
 function saveAntfarmRuns(runs) { writeJson(ANTFARM_RUNS_PATH, runs); }
+
+function getChatHistory() { return readJson(CHAT_HISTORY_PATH, []); }
+function saveChatHistory(rows) { writeJson(CHAT_HISTORY_PATH, rows); }
 
 
 async function gatewayState() {
@@ -311,6 +315,24 @@ app.post('/api/profiles/delete', (req, res) => {
 
 app.get('/api/settings', (req, res) => res.json(getSettings()));
 app.put('/api/settings', (req, res) => { saveSettings(req.body || {}); res.json({ ok: true, settings: getSettings() }); });
+app.post('/api/openai/quick-enable', (req, res) => {
+  const apiKey = String(req.body?.apiKey || '').trim();
+  const oauth = !!req.body?.oauth;
+  if (!apiKey && !oauth) return res.status(400).json({ ok: false, error: 'Provide apiKey or oauth=true' });
+
+  const patch = {
+    openaiApiKey: apiKey || getSettings().openaiApiKey || '',
+    openaiOAuthEnabled: oauth
+  };
+  saveSettings(patch);
+
+  const skills = getSkills().map(s => s.id === 'openai-auth' ? { ...s, installed: true, enabled: true } : s);
+  saveSkills(skills);
+
+  const out = applySettingsToConfigFile();
+  res.json({ ok: true, message: 'OpenAI quick-connect enabled', settings: getSettings(), backup: out.backup });
+});
+
 app.get('/api/settings/export', (req, res) => {
   const payload = { exportedAt: new Date().toISOString(), settings: getSettings() };
   res.setHeader('Content-Type', 'application/json');
@@ -431,6 +453,62 @@ app.put('/api/memory/file', (req, res) => {
   } catch (e) {
     res.status(400).json({ ok: false, error: String(e.message || e) });
   }
+});
+
+app.post('/api/memory/create', (req, res) => {
+  try {
+    const name = String(req.body?.name || '').trim();
+    if (!name) return res.status(400).json({ ok: false, error: 'name is required' });
+    const safe = name.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const dir = path.join(ROOT, 'memory');
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, safe.endsWith('.md') ? safe : `${safe}.md`);
+    if (!fs.existsSync(file)) fs.writeFileSync(file, req.body?.content || `# ${safe}
+`, 'utf8');
+    res.json({ ok: true, path: file });
+  } catch (e) {
+    res.status(400).json({ ok: false, error: String(e.message || e) });
+  }
+});
+
+app.get('/api/memory/export', (req, res) => {
+  const files = [];
+  const memDir = path.join(ROOT, 'memory');
+  if (fs.existsSync(memDir)) {
+    for (const f of fs.readdirSync(memDir).filter(x => x.endsWith('.md'))) {
+      const p = path.join(memDir, f);
+      files.push({ path: p, content: fs.readFileSync(p, 'utf8') });
+    }
+  }
+  const profiles = getProfiles();
+  const payload = { exportedAt: new Date().toISOString(), files, profiles };
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Content-Disposition', 'attachment; filename="quickclaw-memory-export.json"');
+  res.send(JSON.stringify(payload, null, 2));
+});
+
+
+
+app.get('/api/chat/history', (req, res) => {
+  res.json({ messages: getChatHistory().slice(-100) });
+});
+
+app.post('/api/chat/send', (req, res) => {
+  const text = String(req.body?.text || '').trim();
+  if (!text) return res.status(400).json({ ok: false, error: 'text is required' });
+
+  const rows = getChatHistory();
+  rows.push({ role: 'user', text, at: new Date().toISOString() });
+
+  const lower = text.toLowerCase();
+  let reply = 'Got it. I saved this in local chat history. Next: choose a tab to apply this action.';
+  if (lower.includes('openai')) reply = 'Use Integrations tab → OpenAI key + Quick Connect to apply settings into config.';
+  if (lower.includes('memory')) reply = 'Use Memory tab to create/edit files, then Export Memory to download everything.';
+  if (lower.includes('profile')) reply = 'Use Profiles tab to edit notes/soul/memory path and set active profile.';
+
+  rows.push({ role: 'assistant', text: reply, at: new Date().toISOString() });
+  saveChatHistory(rows.slice(-300));
+  res.json({ ok: true, reply, messages: rows.slice(-40) });
 });
 
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));

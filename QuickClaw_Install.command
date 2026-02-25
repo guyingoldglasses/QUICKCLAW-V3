@@ -14,7 +14,7 @@ command -v brew >/dev/null || /bin/bash -c "$(curl -fsSL https://raw.githubuserc
 command -v node >/dev/null || brew install node
 cd "$INSTALL_DIR"
 [[ -f package.json ]] || echo '{"name":"quickclaw-v3-openclaw","private":true,"dependencies":{}}' > package.json
-npm install --no-fund --no-audit open-claw || npm install --no-fund --no-audit openclaw || true
+npm install --no-fund --no-audit openclaw || true
 mkdir -p "$INSTALL_DIR/config"; [[ -f "$INSTALL_DIR/config/default.yaml" ]] || cat > "$INSTALL_DIR/config/default.yaml" <<'YAML'
 gateway:
   port: 5000

@@ -41,11 +41,9 @@ function tailFile(logFile, lines = 120) {
 }
 
 function gatewayCommand() {
-  const a = path.join(INSTALL_DIR, 'node_modules', '.bin', 'open-claw');
   const b = path.join(INSTALL_DIR, 'node_modules', '.bin', 'openclaw');
-  if (fs.existsSync(a)) return `"${a}" gateway start`;
-  if (fs.existsSync(b)) return `"${b}" gateway start`;
-  return 'npx open-claw gateway start';
+  if (fs.existsSync(b)) return `"${b}" gateway start --allow-unconfigured`;
+  return 'npx openclaw gateway start --allow-unconfigured';
 }
 
 function addonsStatus() {

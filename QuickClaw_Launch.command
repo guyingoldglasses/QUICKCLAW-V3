@@ -21,12 +21,10 @@ if [[ ! -f "$PID_DIR/gateway.pid" ]] || ! kill -0 "$(cat "$PID_DIR/gateway.pid")
   cd "$INSTALL_DIR"
   GW_LOG="$LOG_DIR/gateway.log"
 
-  if [[ -x "$INSTALL_DIR/node_modules/.bin/open-claw" ]]; then
-    nohup "$INSTALL_DIR/node_modules/.bin/open-claw" gateway start >> "$GW_LOG" 2>&1 &
-  elif [[ -x "$INSTALL_DIR/node_modules/.bin/openclaw" ]]; then
-    nohup "$INSTALL_DIR/node_modules/.bin/openclaw" gateway start >> "$GW_LOG" 2>&1 &
+  if [[ -x "$INSTALL_DIR/node_modules/.bin/openclaw" ]]; then
+    nohup "$INSTALL_DIR/node_modules/.bin/openclaw" gateway start --allow-unconfigured >> "$GW_LOG" 2>&1 &
   else
-    nohup npx open-claw gateway start >> "$GW_LOG" 2>&1 &
+    nohup npx openclaw gateway start --allow-unconfigured >> "$GW_LOG" 2>&1 &
   fi
 
   echo $! > "$PID_DIR/gateway.pid"

@@ -71,18 +71,68 @@ function getSettings() {
 }
 function saveSettings(s) { writeJson(SETTINGS_PATH, { ...getSettings(), ...s }); }
 
+function defaultSkillsCatalog() {
+  return [
+    {
+      id: 'core-tools',
+      name: 'Core Platform Tools',
+      description: 'Essential local runtime controls: gateway status/start/stop, logs, config read/write, profile storage.',
+      includes: ['gateway controls', 'log viewer', 'config apply/backup', 'profile persistence'],
+      enabled: true,
+      installed: true,
+      risk: 'low'
+    },
+    {
+      id: 'openai-auth',
+      name: 'OpenAI Authentication',
+      description: 'Stores OpenAI credentials and OAuth mode flags for local config generation.',
+      includes: ['api key field', 'oauth mode flag', 'settings export/import'],
+      enabled: false,
+      installed: true,
+      risk: 'medium'
+    },
+    {
+      id: 'ftp-deploy',
+      name: 'FTP Deploy',
+      description: 'Deployment helper settings for FTP host/user workflows.',
+      includes: ['ftp host/user settings', 'future deploy hooks'],
+      enabled: false,
+      installed: false,
+      risk: 'medium'
+    },
+    {
+      id: 'email',
+      name: 'Email Integration',
+      description: 'Email account settings for notifications and outbound workflows.',
+      includes: ['email user settings', 'future send/read actions'],
+      enabled: false,
+      installed: false,
+      risk: 'medium'
+    },
+    {
+      id: 'antfarm',
+      name: 'Antfarm Automation',
+      description: 'Task queue + run history panel for workflow automations.',
+      includes: ['run queue', 'recent runs', 'status panel'],
+      enabled: false,
+      installed: false,
+      risk: 'medium'
+    }
+  ];
+}
+
 function getSkills() {
   const list = readJson(SKILLS_PATH, null);
-  if (Array.isArray(list)) return list;
-  const starter = [
-    { id: 'core-tools', name: 'Core Tools', enabled: true, installed: true, risk: 'low' },
-    { id: 'openai-auth', name: 'OpenAI Auth', enabled: false, installed: true, risk: 'medium' },
-    { id: 'ftp-deploy', name: 'FTP Deploy', enabled: false, installed: false, risk: 'medium' },
-    { id: 'email', name: 'Email', enabled: false, installed: false, risk: 'medium' },
-    { id: 'antfarm', name: 'Antfarm', enabled: false, installed: false, risk: 'medium' }
-  ];
-  writeJson(SKILLS_PATH, starter);
-  return starter;
+  const defaults = defaultSkillsCatalog();
+  if (Array.isArray(list)) {
+    const byId = Object.fromEntries(defaults.map(s => [s.id, s]));
+    const merged = list.map(s => ({ ...byId[s.id], ...s }));
+    // add any new defaults not present yet
+    for (const d of defaults) if (!merged.find(x => x.id === d.id)) merged.push(d);
+    return merged;
+  }
+  writeJson(SKILLS_PATH, defaults);
+  return defaults;
 }
 function saveSkills(list) { writeJson(SKILLS_PATH, list); }
 

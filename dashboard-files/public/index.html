@@ -173,7 +173,15 @@ async function renderIntegrations(){
 
 async function renderSkills(){
   const r=await j('/api/skills'); const skills=r.skills||[];
-  const rows=skills.map(s=>`<div class="card"><div class="row"><b>${esc(s.name)}</b><span class="pill">risk: ${esc(s.risk||'n/a')}</span><span class="pill">installed: ${s.installed?'yes':'no'}</span><span class="pill">enabled: ${s.enabled?'yes':'no'}</span></div><div class="row" style="margin-top:8px"><button onclick="installSkill('${s.id}')">Install</button><button onclick="toggleSkill('${s.id}', ${!s.enabled})">${s.enabled?'Disable':'Enable'}</button></div></div>`).join('');
+  const rows=skills.map(s=>{
+    const includes = Array.isArray(s.includes) ? s.includes.join(', ') : '';
+    return `<div class="card">
+      <div class="row"><b>${esc(s.name)}</b><span class="pill">risk: ${esc(s.risk||'n/a')}</span><span class="pill">installed: ${s.installed?'yes':'no'}</span><span class="pill">enabled: ${s.enabled?'yes':'no'}</span></div>
+      <div class="muted" style="margin-top:6px">${esc(s.description||'No description yet.')}</div>
+      ${includes ? `<div class="muted" style="margin-top:4px"><b>Includes:</b> ${esc(includes)}</div>` : ''}
+      <div class="row" style="margin-top:8px"><button onclick="installSkill('${s.id}')">Install</button><button onclick="toggleSkill('${s.id}', ${!s.enabled})">${s.enabled?'Disable':'Enable'}</button></div>
+    </div>`;
+  }).join('');
   document.getElementById('tab-skills').innerHTML=`<div class="card"><b>Skills Manager</b><p class="muted">Local-mode skills toggles and install flags. Full runtime install hooks can be layered next.</p></div>${rows}`;
 }
 

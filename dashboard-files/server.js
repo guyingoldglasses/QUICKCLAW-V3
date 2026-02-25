@@ -597,7 +597,17 @@ app.put('/api/system/writefile', (req, res) => {
   } catch (e) { res.status(400).json({ error: String(e.message || e) }); }
 });
 
-app.get('/api/usage/all', (req, res) => res.json({ totalTokens: 0, totalCost: 0, sessions: 0, byModel: [] }));
+app.get('/api/usage/all', (req, res) => res.json({
+  totals: {
+    cost: 0,
+    tokens: 0,
+    requests: 0,
+    sessions: 0
+  },
+  byModel: [],
+  byProfile: [],
+  recent: []
+}));
 app.get('/api/updates/workspace/', (req, res) => res.json({ ok: true, items: [] }));
 app.get('/api/updates/workspace/:id', (req, res) => res.json({ ok: true, id: req.params.id, item: null }));
 app.post('/api/updates/cli/upgrade', (req, res) => res.json({ ok: false, message: 'Manual zip update flow currently enabled.' }));

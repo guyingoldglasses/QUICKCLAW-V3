@@ -422,12 +422,13 @@ app.put('/api/system/writefile', (req, res) => {
 
 app.get('/api/security/audit', async (req, res) => {
   const gw = await gatewayState();
-  const findings = [];
-  if (!gw.running) findings.push({ level: 'warn', message: 'Gateway is not running.' });
-  if (!fs.existsSync(CONFIG_PATH)) findings.push({ level: 'warn', message: 'Config file missing.' });
-  findings.push({ level: 'info', message: 'Deep security automation is not enabled in local mode yet.' });
-  const score = findings.filter(f => f.level === 'warn').length ? 72 : 88;
-  res.json({ ok: true, score, findings });
+  const checks = [];
+  checks.push({ name: 'Gateway running', status: gw.running ? 'pass' : 'warn', detail: gw.running ? 'Gateway is running.' : 'Gateway is not running.' });
+  checks.push({ name: 'Config file', status: fs.existsSync(CONFIG_PATH) ? 'pass' : 'warn', detail: fs.existsSync(CONFIG_PATH) ? 'Config present.' : 'Config missing.' });
+  checks.push({ name: 'Local hardening', status: 'info', detail: 'Deep security automation is not enabled in local mode yet.' });
+  const score = checks.some(c => c.status === 'warn') ? 72 : 88;
+  const findings = checks.map(c => ({ level: c.status === 'pass' ? 'info' : c.status, message: `${c.name}: ${c.detail}` }));
+  res.json({ ok: true, score, checks, findings });
 });
 app.post('/api/security/fix', (req, res) => {
   res.json({ ok: false, message: 'Automatic security fixes are not yet enabled in local mode.' });
@@ -697,8 +698,8 @@ app.post('/api/profiles/:id/:action', (req, res) => res.json({ ok: true, action:
 // Auth/OAuth compatibility flows expected by Command Center
 app.post('/api/profiles/:id/auth/oauth/start', (req, res) => {
   const clientId = req.body?.clientId || 'local-oauth-client';
-  const authUrl = `https://auth.openai.com/authorize?client_id=${encodeURIComponent(clientId)}&response_type=code`;
-  res.json({ success: true, authUrl, clientId });
+  const authUrl = `https://platform.openai.com/settings/organization/api-keys`;
+  res.json({ success: true, authUrl, clientId, note: 'OpenAI OAuth helper: create/copy key from OpenAI page, then paste in Integrations/Auth.' });
 });
 app.post('/api/profiles/:id/auth/oauth/complete', (req, res) => {
   res.json({ success: true, message: 'OAuth callback captured (local-mode simulated).' });

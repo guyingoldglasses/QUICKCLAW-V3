@@ -995,20 +995,22 @@ app.get('/oauth/start-codex', (req, res) => {
   const globalCmd = `openclaw onboard --auth-choice openai-codex`;
   const cmd = `(${globalCmd}) || (${localCmd})`;
 
-  let launchMsg = 'Opened OAuth command in Terminal.';
+  let launched = false;
+  let error = null;
   try {
     if (process.platform === 'darwin') {
-      const escaped = cmd.replace(/"/g, '\\"');
+      const escaped = cmd.replace(/"/g, '\"');
       execSync(`osascript -e 'tell application "Terminal" to do script "${escaped}"'`, { stdio: 'ignore' });
-    } else {
-      launchMsg = `Run manually: ${cmd}`;
+      launched = true;
     }
   } catch (e) {
-    launchMsg = `Could not auto-open Terminal. Run manually: ${cmd}`;
+    error = String(e.message || e);
   }
 
-  res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.end(`<!doctype html><html><head><meta charset="utf-8"><title>Codex OAuth</title><style>body{font-family:system-ui;background:#0f1115;color:#e7e9ee;padding:24px}code{background:#1a1f2a;padding:4px 8px;border-radius:6px}a{color:#8ab4ff}</style></head><body><h2>OpenAI Codex OAuth Helper</h2><p>${launchMsg}</p><p>Profile: <code>${profile}</code></p><ol><li>Complete login in Terminal window.</li><li>If it says no provider plugins found, run <code>openclaw plugins doctor</code> and share output.</li><li>Return to dashboard Auth tab and click Refresh/Auth.</li></ol><p>Manual command:</p><p><code>${cmd}</code></p><p><a href="http://localhost:${PORT}">Back to Dashboard</a></p></body></html>`);
+  // No manual command wall page; redirect back to dashboard with status flags.
+  const q = new URLSearchParams({ oauth: 'codex', started: launched ? '1' : '0', profile });
+  if (error) q.set('oauthError', error.slice(0, 240));
+  return res.redirect(`/?${q.toString()}#auth`);
 });
 
 // API safety net: never return HTML for unknown /api routes (prevents client JSON parse failures)

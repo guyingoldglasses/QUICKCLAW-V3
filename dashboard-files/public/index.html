@@ -136,7 +136,7 @@ async function renderIntegrations(){
     <div class="row" style="margin-top:10px">
       <button onclick="saveSettings()">Save Settings</button>
       <button onclick="applySettingsToConfig()">Apply Settings To Config</button>
-      <button onclick="window.location=`${API_BASE}/api/settings/export`">Export Settings</button>
+      <button onclick="exportSettings()">Export Settings</button>
     </div></div>
     <div class="card"><b>Import Settings JSON</b>
       <textarea id="importJson" rows="8" style="width:100%" placeholder='{"settings":{"openaiApiKey":"..."}}'></textarea>
@@ -203,6 +203,7 @@ async function deleteProfile(){const id=document.getElementById('profilesSelect'
 async function saveSettings(){const payload={}; payload.openaiApiKey=document.getElementById('openaiApiKey')?.value||''; payload.openaiOAuthEnabled=!!document.getElementById('openaiOAuthEnabled')?.checked; payload.anthropicApiKey=document.getElementById('anthropicApiKey')?.value||''; payload.telegramBotToken=document.getElementById('telegramBotToken')?.value||''; payload.ftpHost=document.getElementById('ftpHost')?.value||''; payload.ftpUser=document.getElementById('ftpUser')?.value||''; payload.emailUser=document.getElementById('emailUser')?.value||''; await j('/api/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}); showToast('Settings saved');} 
 async function applySettingsToConfig(){const r=await j('/api/settings/apply-config',{method:'POST'}); await renderConfig(); await renderOverview(); showToast(r.backup?'Config applied + backup created':'Config applied');}
 async function importSettings(){try{const v=JSON.parse(document.getElementById('importJson').value||'{}'); await j('/api/settings/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(v)}); await renderIntegrations(); showToast('Settings imported');}catch(e){alert('Invalid JSON');}}
+function exportSettings(){ window.location = `${API_BASE}/api/settings/export`; }
 
 async function installSkill(id){await j('/api/skills/install',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})}); await renderSkills();}
 async function toggleSkill(id,enabled){await j('/api/skills/toggle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,enabled})}); await renderSkills();}

@@ -57,8 +57,9 @@ const tabs=['overview','profiles','integrations','skills','system','security','l
 let currentTab='overview';
 const fields=['openaiApiKey','openaiOAuthEnabled','anthropicApiKey','telegramBotToken','ftpHost','ftpUser','emailUser'];
 
-async function j(u,o){const r=await fetch(u,o);return r.json();}
-async function txt(u){const r=await fetch(u);return r.text();}
+const API_BASE = (location.protocol === 'http:' || location.protocol === 'https:') ? '' : 'http://localhost:3000';
+async function j(u,o){const r=await fetch(`${API_BASE}${u}`,o);return r.json();}
+async function txt(u){const r=await fetch(`${API_BASE}${u}`);return r.text();}
 const esc=s=>String(s||'').replace(/[&<>]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[m]));
 function addonPill(name,val){const c=val==='missing'?'bad':'ok';return `<span class="pill ${c}">${name}: ${val}</span>`;}
 
@@ -127,7 +128,7 @@ async function renderIntegrations(){
     <div class="row" style="margin-top:10px">
       <button onclick="saveSettings()">Save Settings</button>
       <button onclick="applySettingsToConfig()">Apply Settings To Config</button>
-      <button onclick="window.location='/api/settings/export'">Export Settings</button>
+      <button onclick="window.location=`${API_BASE}/api/settings/export`">Export Settings</button>
     </div></div>
     <div class="card"><b>Import Settings JSON</b>
       <textarea id="importJson" rows="8" style="width:100%" placeholder='{"settings":{"openaiApiKey":"..."}}'></textarea>

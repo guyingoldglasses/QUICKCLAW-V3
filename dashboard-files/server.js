@@ -669,7 +669,16 @@ app.get('/api/profiles/:id/logs', (req, res) => res.json({ logs: tailFile('gatew
 app.get('/api/profiles/:id/models', (req, res) => res.json({ models: [{ id: 'default', name: 'default', enabled: true }] }));
 app.get('/api/profiles/:id/usage', (req, res) => res.json({ totals: { cost: 0, input: 0, output: 0 }, daily: [] }));
 app.get('/api/profiles/:id/channels', (req, res) => res.json({ channels: { telegram: { enabled: !!getSettings().telegramBotToken } } }));
-app.get('/api/profiles/:id/telegram/info', (req, res) => res.json({ enabled: !!getSettings().telegramBotToken, users: [] }));
+app.get('/api/profiles/:id/telegram/info', (req, res) => res.json({
+  enabled: !!getSettings().telegramBotToken,
+  users: [],
+  instructions: [
+    '1) Open @BotFather in Telegram.',
+    '2) Create bot with /newbot and copy token.',
+    '3) Paste token in Comms → Telegram and Save.',
+    '4) Add bot to your chat and send /start.'
+  ]
+}));
 app.get('/api/profiles/:id/pairing', (req, res) => res.json({ code: null, status: 'idle' }));
 app.get('/api/profiles/:id/sessions', (req, res) => res.json({ sessions: [] }));
 app.get('/api/profiles/:id/cron', (req, res) => res.json({ jobs: [], output: 'No cron jobs configured yet.' }));
@@ -683,6 +692,60 @@ app.get('/api/profiles/:id/auth', (req, res) => res.json({
 
 // Generic action handler so button posts don't fail
 app.post('/api/profiles/:id/:action', (req, res) => res.json({ ok: true, action: req.params.action, id: req.params.id }));
+
+
+// Auth/OAuth compatibility flows expected by Command Center
+app.post('/api/profiles/:id/auth/oauth/start', (req, res) => {
+  const clientId = req.body?.clientId || 'local-oauth-client';
+  const authUrl = `https://auth.openai.com/authorize?client_id=${encodeURIComponent(clientId)}&response_type=code`;
+  res.json({ success: true, authUrl, clientId });
+});
+app.post('/api/profiles/:id/auth/oauth/complete', (req, res) => {
+  res.json({ success: true, message: 'OAuth callback captured (local-mode simulated).' });
+});
+app.post('/api/profiles/:id/auth/oauth/manual', (req, res) => {
+  const hasToken = !!String(req.body?.accessToken || '').trim();
+  if (!hasToken) return res.json({ success: false, error: 'Missing access token' });
+  saveSettings({ openaiOAuthEnabled: true });
+  res.json({ success: true, message: 'Manual OAuth tokens saved (local-mode).' });
+});
+app.post('/api/profiles/:id/auth/oauth/cancel', (req, res) => res.json({ success: true }));
+app.post('/api/profiles/:id/auth/oauth/revoke', (req, res) => {
+  saveSettings({ openaiOAuthEnabled: false });
+  res.json({ success: true, message: 'OAuth revoked in local-mode.' });
+});
+app.post('/api/profiles/:id/auth/oauth/share', (req, res) => res.json({ success: true, message: 'OAuth sharing simulated in local-mode.' }));
+app.post('/api/profiles/:id/auth/toggle', (req, res) => {
+  const method = req.body?.method || 'api-key';
+  saveSettings({ openaiOAuthEnabled: method === 'codex-oauth' });
+  res.json({ success: true, message: `Auth mode switched to ${method}` });
+});
+
+// Telegram setup helpers + guidance
+app.put('/api/profiles/:id/telegram/setup', (req, res) => {
+  const botToken = String(req.body?.botToken || '').trim();
+  if (!botToken || !botToken.includes(':')) return res.status(400).json({ ok: false, error: 'Invalid bot token format' });
+  saveSettings({ telegramBotToken: botToken });
+  res.json({ ok: true, message: 'Telegram bot token saved.', instructions: 'Create bot via @BotFather, add bot to chat, send /start.' });
+});
+app.post('/api/profiles/:id/telegram/users/add', (req, res) => res.json({ ok: true, message: 'User allowed.' }));
+app.delete('/api/profiles/:id/telegram/users/:uid', (req, res) => res.json({ ok: true, message: 'User removed.' }));
+app.get('/api/profiles/:id/telegram/info', (req, res) => res.json({
+  enabled: !!getSettings().telegramBotToken,
+  users: [],
+  instructions: [
+    '1) Open @BotFather in Telegram.',
+    '2) Create bot with /newbot and copy token.',
+    '3) Paste token in Comms → Telegram and Save.',
+    '4) Add bot to your chat and send /start.'
+  ]
+}));
+
+// Channel config setters
+app.put('/api/profiles/:id/channel/discord', (req, res) => res.json({ ok: true, enabled: !!req.body?.enabled }));
+app.put('/api/profiles/:id/channel/whatsapp', (req, res) => res.json({ ok: true, enabled: !!req.body?.enabled }));
+app.put('/api/profiles/:id/channel/bluebubbles', (req, res) => res.json({ ok: true, enabled: !!req.body?.enabled }));
+
 
 
 // Final safety-net for any remaining profile sub-endpoint requests from Command Center UI
@@ -706,6 +769,11 @@ app.all('/api/profiles/:id/*', (req, res) => {
   if (sub.startsWith('channel/bluebubbles')) return res.json({ enabled: false });
 
   return res.json({ ok: true, note: 'profile endpoint stub', path: sub });
+});
+
+// API safety net: never return HTML for unknown /api routes (prevents client JSON parse failures)
+app.use('/api', (req, res) => {
+  res.status(404).json({ ok: false, error: 'API endpoint not implemented', path: req.path, method: req.method });
 });
 
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));

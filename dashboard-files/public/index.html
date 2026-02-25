@@ -46,6 +46,8 @@
   <section id="tab-profiles" class="tabpane hidden"></section>
   <section id="tab-integrations" class="tabpane hidden"></section>
   <section id="tab-skills" class="tabpane hidden"></section>
+  <section id="tab-antfarm" class="tabpane hidden"></section>
+  <section id="tab-memory" class="tabpane hidden"></section>
   <section id="tab-system" class="tabpane hidden"></section>
   <section id="tab-security" class="tabpane hidden"></section>
   <section id="tab-logs" class="tabpane hidden"></section>
@@ -55,7 +57,7 @@
 
 <script>
 let LAST={root:'',config:''};
-const tabs=['overview','profiles','integrations','skills','system','security','logs','config','activity'];
+const tabs=['overview','profiles','integrations','skills','antfarm','memory','system','security','logs','config','activity'];
 let currentTab='overview';
 const fields=['openaiApiKey','openaiOAuthEnabled','anthropicApiKey','telegramBotToken','ftpHost','ftpUser','emailUser'];
 
@@ -98,7 +100,7 @@ async function setTab(tab){
 }
 
 async function renderTab(tab){
-  const map={overview:renderOverview,profiles:renderProfiles,integrations:renderIntegrations,skills:renderSkills,system:renderSystem,security:renderSecurity,logs:renderLogs,config:renderConfig,activity:renderActivity};
+  const map={overview:renderOverview,profiles:renderProfiles,integrations:renderIntegrations,skills:renderSkills,antfarm:renderAntfarm,memory:renderMemory,system:renderSystem,security:renderSecurity,logs:renderLogs,config:renderConfig,activity:renderActivity};
   const fn=map[tab];
   if(!fn) return;
   try{ await fn(); }
@@ -132,8 +134,17 @@ async function renderProfiles(){
   const list=profiles.map(p=>`${p.active?'*':'-'} ${p.name} [${p.id}] | created ${p.createdAt||'-'} | last used ${p.lastUsedAt||'-'}`).join('\n')||'(none)';
   document.getElementById('tab-profiles').innerHTML=`
     <div class="card"><div class="row"><input id="newProfileName" placeholder="Profile name"><input id="newProfileNotes" placeholder="notes (optional)"><button onclick="createProfile()">Add Profile</button></div></div>
-    <div class="card"><div class="row"><select id="profilesSelect">${options}</select><button onclick="activateSelectedProfile()">Set Active</button><input id="renameProfileName" placeholder="new name"><button onclick="renameProfile()">Rename</button><button onclick="deleteProfile()">Delete</button></div></div>
+    <div class="card"><div class="row"><select id="profilesSelect" onchange="loadProfileEditor()">${options}</select><button onclick="activateSelectedProfile()">Set Active</button><input id="renameProfileName" placeholder="new name"><button onclick="renameProfile()">Rename</button><button onclick="deleteProfile()">Delete</button></div></div>
+    <div class="card"><b>Selected Profile Details</b>
+      <div class="grid" style="margin-top:8px">
+        <div><div class="stat">Notes</div><textarea id="profileNotes" rows="4" style="width:100%"></textarea></div>
+        <div><div class="stat">Soul / Persona</div><textarea id="profileSoul" rows="4" style="width:100%"></textarea></div>
+        <div><div class="stat">Memory File Path</div><input id="profileMemoryPath" style="width:100%" placeholder="/Volumes/.../QuickClaw/memory/2026-02-25.md"></div>
+      </div>
+      <div class="row" style="margin-top:8px"><button onclick="saveProfileDetails()">Save Profile Details</button></div>
+    </div>
     <div class="card"><b>All Profiles</b><pre>${esc(list)}</pre></div>`;
+  setTimeout(loadProfileEditor, 0);
 }
 
 async function renderIntegrations(){
@@ -164,6 +175,25 @@ async function renderSkills(){
   const r=await j('/api/skills'); const skills=r.skills||[];
   const rows=skills.map(s=>`<div class="card"><div class="row"><b>${esc(s.name)}</b><span class="pill">risk: ${esc(s.risk||'n/a')}</span><span class="pill">installed: ${s.installed?'yes':'no'}</span><span class="pill">enabled: ${s.enabled?'yes':'no'}</span></div><div class="row" style="margin-top:8px"><button onclick="installSkill('${s.id}')">Install</button><button onclick="toggleSkill('${s.id}', ${!s.enabled})">${s.enabled?'Disable':'Enable'}</button></div></div>`).join('');
   document.getElementById('tab-skills').innerHTML=`<div class="card"><b>Skills Manager</b><p class="muted">Local-mode skills toggles and install flags. Full runtime install hooks can be layered next.</p></div>${rows}`;
+}
+
+async function renderAntfarm(){
+  const st=await j('/api/antfarm/status');
+  const rs=await j('/api/antfarm/runs');
+  const runs=(rs.runs||[]).slice(0,20).map(r=>`- ${r.createdAt||''} | ${r.status} | ${r.task}`).join(' | ')||'(no runs yet)';
+  document.getElementById('tab-antfarm').innerHTML=`
+    <div class="card"><b>Antfarm</b><div class="muted">installedHint: ${st.installedHint?'yes':'no'} | runs: ${st.runsCount||0}</div>
+      <div class="row" style="margin-top:8px"><input id="antfarmTask" placeholder="Enter task" style="min-width:280px"><button onclick="runAntfarmTask()">Run Task</button></div>
+    </div>
+    <div class="card"><b>Recent Runs</b><pre>${esc(runs)}</pre></div>`;
+}
+
+async function renderMemory(){
+  const r=await j('/api/memory/files');
+  const opts=(r.files||[]).map(f=>`<option value="${esc(f)}">${esc(f)}</option>`).join('');
+  document.getElementById('tab-memory').innerHTML=`
+    <div class="card"><b>Memory Files</b><div class="row" style="margin-top:8px"><select id="memorySelect" style="min-width:380px">${opts}</select><button onclick="loadMemoryFile()">Load</button><button onclick="saveMemoryFile()">Save</button></div>
+    <textarea id="memoryContent" rows="16" style="width:100%;margin-top:8px"></textarea></div>`;
 }
 
 async function renderSystem(){

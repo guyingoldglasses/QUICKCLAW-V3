@@ -16,6 +16,7 @@ const PROFILES_PATH = path.join(DATA_DIR, 'profiles.json');
 const SETTINGS_PATH = path.join(DATA_DIR, 'settings.json');
 const SKILLS_PATH = path.join(DATA_DIR, 'skills.json');
 const CONFIG_BACKUPS_DIR = path.join(DATA_DIR, 'config-backups');
+const ANTFARM_RUNS_PATH = path.join(DATA_DIR, 'antfarm-runs.json');
 
 for (const d of [PID_DIR, LOG_DIR, DATA_DIR, CONFIG_BACKUPS_DIR]) if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
 
@@ -51,7 +52,7 @@ function gatewayStopCommand() { return `${cliBin()} gateway stop`; }
 function getProfiles() {
   const list = readJson(PROFILES_PATH, null);
   if (Array.isArray(list) && list.length) return list;
-  const starter = [{ id: 'default', name: 'Default', active: true, notes: '', createdAt: new Date().toISOString(), lastUsedAt: new Date().toISOString() }];
+  const starter = [{ id: 'default', name: 'Default', active: true, notes: '', soul: '', memoryPath: '', createdAt: new Date().toISOString(), lastUsedAt: new Date().toISOString() }];
   writeJson(PROFILES_PATH, starter);
   return starter;
 }
@@ -84,6 +85,10 @@ function getSkills() {
   return starter;
 }
 function saveSkills(list) { writeJson(SKILLS_PATH, list); }
+
+function getAntfarmRuns() { return readJson(ANTFARM_RUNS_PATH, []); }
+function saveAntfarmRuns(runs) { writeJson(ANTFARM_RUNS_PATH, runs); }
+
 
 async function gatewayState() {
   const ws18789 = portListeningSync(18789);
@@ -214,7 +219,7 @@ app.get('/api/profiles', (req, res) => res.json({ profiles: getProfiles() }));
 app.post('/api/profiles', (req, res) => {
   const list = getProfiles();
   const id = `p-${Date.now()}`;
-  list.push({ id, name: req.body?.name || `Profile ${list.length + 1}`, active: false, notes: req.body?.notes || '', createdAt: new Date().toISOString(), lastUsedAt: null });
+  list.push({ id, name: req.body?.name || `Profile ${list.length + 1}`, active: false, notes: req.body?.notes || '', soul: req.body?.soul || '', memoryPath: req.body?.memoryPath || '', createdAt: new Date().toISOString(), lastUsedAt: null });
   saveProfiles(list);
   res.json({ ok: true, profiles: list });
 });
@@ -231,6 +236,20 @@ app.post('/api/profiles/rename', (req, res) => {
   saveProfiles(list);
   res.json({ ok: true, profiles: list });
 });
+
+app.post('/api/profiles/update', (req, res) => {
+  const { id, name, notes, soul, memoryPath } = req.body || {};
+  const list = getProfiles().map(p => p.id === id ? {
+    ...p,
+    name: name ?? p.name,
+    notes: notes ?? p.notes,
+    soul: soul ?? p.soul,
+    memoryPath: memoryPath ?? p.memoryPath
+  } : p);
+  saveProfiles(list);
+  res.json({ ok: true, profiles: list });
+});
+
 app.post('/api/profiles/delete', (req, res) => {
   const { id } = req.body || {};
   let list = getProfiles().filter(p => p.id !== id);
@@ -304,6 +323,64 @@ app.post('/api/security/fix', (req, res) => {
 
 app.get('/api/updates/cli', (req, res) => {
   res.json({ ok: true, current: 'quickclaw-v3', latest: 'quickclaw-v3', canUpgrade: false, message: 'Manual zip update flow currently enabled.' });
+});
+
+
+app.get('/api/antfarm/status', async (req, res) => {
+  const nodeBin = fs.existsSync(path.join(INSTALL_DIR, 'node_modules', '.bin', 'node'));
+  const runs = getAntfarmRuns();
+  res.json({ ok: true, installedHint: nodeBin, runsCount: runs.length, lastRun: runs[0] || null });
+});
+
+app.get('/api/antfarm/runs', (req, res) => {
+  res.json({ runs: getAntfarmRuns() });
+});
+
+app.post('/api/antfarm/run', async (req, res) => {
+  const task = String(req.body?.task || '').trim();
+  if (!task) return res.status(400).json({ ok: false, error: 'task is required' });
+
+  const runRecord = {
+    id: `run-${Date.now()}`,
+    task,
+    status: 'queued',
+    createdAt: new Date().toISOString(),
+    output: 'Local mode stub: command queued. Full antfarm runtime hook pending.'
+  };
+  const runs = getAntfarmRuns();
+  runs.unshift(runRecord);
+  saveAntfarmRuns(runs.slice(0, 100));
+  res.json({ ok: true, run: runRecord });
+});
+
+app.get('/api/memory/files', (req, res) => {
+  try {
+    const dir = path.join(ROOT, 'memory');
+    if (!fs.existsSync(dir)) return res.json({ files: [] });
+    const files = fs.readdirSync(dir).filter(f => f.endsWith('.md')).sort().reverse();
+    res.json({ files: files.map(f => path.join(dir, f)) });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e.message || e) });
+  }
+});
+
+app.get('/api/memory/file', (req, res) => {
+  try {
+    const p = ensureWithinRoot(req.query.path || '');
+    res.json({ ok: true, path: p, content: fs.readFileSync(p, 'utf8') });
+  } catch (e) {
+    res.status(400).json({ ok: false, error: String(e.message || e) });
+  }
+});
+
+app.put('/api/memory/file', (req, res) => {
+  try {
+    const p = ensureWithinRoot(req.body?.path || '');
+    fs.writeFileSync(p, req.body?.content || '', 'utf8');
+    res.json({ ok: true, path: p });
+  } catch (e) {
+    res.status(400).json({ ok: false, error: String(e.message || e) });
+  }
 });
 
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));

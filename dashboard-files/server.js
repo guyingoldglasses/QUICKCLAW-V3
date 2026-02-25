@@ -8,11 +8,14 @@ const PORT = process.env.DASHBOARD_PORT || 3000;
 const ROOT = process.env.QUICKCLAW_ROOT || path.resolve(__dirname, '..');
 const PID_DIR = path.join(ROOT, '.pids');
 const LOG_DIR = path.join(ROOT, 'logs');
+const DATA_DIR = path.join(ROOT, 'dashboard-data');
 const INSTALL_DIR = path.join(ROOT, 'openclaw');
 const CONFIG_PATH = path.join(INSTALL_DIR, 'config', 'default.yaml');
 const LOCAL_OPENCLAW = path.join(INSTALL_DIR, 'node_modules', '.bin', 'openclaw');
+const PROFILES_PATH = path.join(DATA_DIR, 'profiles.json');
+const SETTINGS_PATH = path.join(DATA_DIR, 'settings.json');
 
-for (const d of [PID_DIR, LOG_DIR]) if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
+for (const d of [PID_DIR, LOG_DIR, DATA_DIR]) if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
 
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
@@ -24,56 +27,45 @@ function run(cmd, opts = {}) {
     });
   });
 }
-
-function portListeningSync(port) {
-  try {
-    execSync(`lsof -ti tcp:${port}`, { stdio: 'pipe' });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
+function portListeningSync(port) { try { execSync(`lsof -ti tcp:${port}`, { stdio: 'pipe' }); return true; } catch { return false; } }
 function tailFile(logFile, lines = 120) {
   const p = path.join(LOG_DIR, logFile);
   if (!fs.existsSync(p)) return '';
-  const txt = fs.readFileSync(p, 'utf8');
-  const arr = txt.split('\n');
-  return arr.slice(-Math.max(lines, 1)).join('\n');
+  return fs.readFileSync(p, 'utf8').split('\n').slice(-Math.max(lines, 1)).join('\n');
 }
+function readJson(p, fallback) { try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return fallback; } }
+function writeJson(p, obj) { fs.writeFileSync(p, JSON.stringify(obj, null, 2)); }
 
-function cliBin() {
-  if (fs.existsSync(LOCAL_OPENCLAW)) return `"${LOCAL_OPENCLAW}"`;
-  return 'npx openclaw';
-}
+function cliBin() { return fs.existsSync(LOCAL_OPENCLAW) ? `"${LOCAL_OPENCLAW}"` : 'npx openclaw'; }
+function gatewayStartCommand() { return `${cliBin()} gateway start --allow-unconfigured`; }
+function gatewayStopCommand() { return `${cliBin()} gateway stop`; }
 
-function gatewayStartCommand() {
-  return `${cliBin()} gateway start --allow-unconfigured`;
+function getProfiles() {
+  const list = readJson(PROFILES_PATH, null);
+  if (Array.isArray(list) && list.length) return list;
+  const starter = [{ id: 'default', name: 'Default', active: true, createdAt: new Date().toISOString() }];
+  writeJson(PROFILES_PATH, starter);
+  return starter;
 }
-
-function gatewayStopCommand() {
-  return `${cliBin()} gateway stop`;
+function saveProfiles(list) { writeJson(PROFILES_PATH, list); }
+function getSettings() {
+  return readJson(SETTINGS_PATH, {
+    openaiApiKey: '', anthropicApiKey: '', telegramBotToken: '', ftpHost: '', ftpUser: '', emailUser: ''
+  });
 }
+function saveSettings(s) { writeJson(SETTINGS_PATH, { ...getSettings(), ...s }); }
 
 async function gatewayState() {
   const ws18789 = portListeningSync(18789);
   const ws5000 = portListeningSync(5000);
-
   const status = await run(`${cliBin()} gateway status`, { cwd: INSTALL_DIR });
   const txt = `${status.stdout}\n${status.stderr}`;
   const looksRunning = /Runtime:\s*running|listening on ws:\/\/127\.0\.0\.1:18789|gateway\s+running/i.test(txt);
-
-  return {
-    running: ws18789 || ws5000 || looksRunning,
-    ws18789,
-    port5000: ws5000,
-    statusText: txt.trim()
-  };
+  return { running: ws18789 || ws5000 || looksRunning, ws18789, port5000: ws5000, statusText: txt.trim() };
 }
 
 function addonsStatus() {
-  let cfg = '';
-  try { cfg = fs.readFileSync(CONFIG_PATH, 'utf8'); } catch {}
+  const cfg = fs.existsSync(CONFIG_PATH) ? fs.readFileSync(CONFIG_PATH, 'utf8') : '';
   const has = (k) => cfg.includes(`${k}:`);
   return {
     openai: has('openai') ? 'configured-section' : 'missing',
@@ -104,19 +96,15 @@ app.get('/api/log/:name', (req, res) => {
 });
 
 app.post('/api/gateway/start', async (req, res) => {
-  const cmd = gatewayStartCommand();
-  const result = await run(`${cmd} >> "${path.join(LOG_DIR, 'gateway.log')}" 2>&1`, { cwd: INSTALL_DIR });
+  const result = await run(`${gatewayStartCommand()} >> "${path.join(LOG_DIR, 'gateway.log')}" 2>&1`, { cwd: INSTALL_DIR });
   const gw = await gatewayState();
-  res.json({ ok: gw.running, message: gw.running ? 'gateway running' : 'gateway start attempted', cmd, result, gateway: gw });
+  res.json({ ok: gw.running, message: gw.running ? 'gateway running' : 'gateway start attempted', result, gateway: gw });
 });
-
 app.post('/api/gateway/stop', async (req, res) => {
-  const cmd = gatewayStopCommand();
-  const result = await run(`${cmd} >> "${path.join(LOG_DIR, 'gateway.log')}" 2>&1`, { cwd: INSTALL_DIR });
+  const result = await run(`${gatewayStopCommand()} >> "${path.join(LOG_DIR, 'gateway.log')}" 2>&1`, { cwd: INSTALL_DIR });
   const gw = await gatewayState();
-  res.json({ ok: !gw.running, message: !gw.running ? 'gateway stopped' : 'gateway stop attempted', cmd, result, gateway: gw });
+  res.json({ ok: !gw.running, message: !gw.running ? 'gateway stopped' : 'gateway stop attempted', result, gateway: gw });
 });
-
 app.post('/api/gateway/restart', async (req, res) => {
   await run(`${gatewayStopCommand()} >> "${path.join(LOG_DIR, 'gateway.log')}" 2>&1`, { cwd: INSTALL_DIR });
   await run(`${gatewayStartCommand()} >> "${path.join(LOG_DIR, 'gateway.log')}" 2>&1`, { cwd: INSTALL_DIR });
@@ -126,9 +114,26 @@ app.post('/api/gateway/restart', async (req, res) => {
 
 app.get('/api/config', (req, res) => {
   const exists = fs.existsSync(CONFIG_PATH);
-  const content = exists ? fs.readFileSync(CONFIG_PATH, 'utf8') : '';
-  res.json({ exists, path: CONFIG_PATH, content });
+  res.json({ exists, path: CONFIG_PATH, content: exists ? fs.readFileSync(CONFIG_PATH, 'utf8') : '' });
 });
+
+app.get('/api/profiles', (req, res) => res.json({ profiles: getProfiles() }));
+app.post('/api/profiles', (req, res) => {
+  const list = getProfiles();
+  const id = `p-${Date.now()}`;
+  list.push({ id, name: req.body?.name || `Profile ${list.length + 1}`, active: false, createdAt: new Date().toISOString() });
+  saveProfiles(list);
+  res.json({ ok: true, profiles: list });
+});
+app.post('/api/profiles/activate', (req, res) => {
+  const id = req.body?.id;
+  const list = getProfiles().map(p => ({ ...p, active: p.id === id }));
+  saveProfiles(list);
+  res.json({ ok: true, profiles: list });
+});
+
+app.get('/api/settings', (req, res) => res.json(getSettings()));
+app.put('/api/settings', (req, res) => { saveSettings(req.body || {}); res.json({ ok: true, settings: getSettings() }); });
 
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 app.listen(PORT, () => console.log(`V3 dashboard at http://localhost:${PORT}`));

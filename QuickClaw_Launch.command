@@ -30,7 +30,7 @@ if [[ ! -f "$PID_DIR/gateway.pid" ]] || ! kill -0 "$(cat "$PID_DIR/gateway.pid")
   echo $! > "$PID_DIR/gateway.pid"
 fi
 
-# Dashboard port handling
+# Dashboard port handling (prefer 3000, then first free through 3005)
 DB_PORT=3000
 PORT_PID=$(lsof -ti tcp:$DB_PORT 2>/dev/null | head -n1 || true)
 
@@ -40,7 +40,12 @@ if [[ -n "$PORT_PID" ]]; then
     echo "$PORT_PID" > "$PID_DIR/dashboard.pid"
     echo "[info] Reusing dashboard on :$DB_PORT (PID $PORT_PID)"
   else
-    DB_PORT=3001
+    for p in 3001 3002 3003 3004 3005; do
+      if [[ -z "$(lsof -ti tcp:$p 2>/dev/null | head -n1 || true)" ]]; then
+        DB_PORT=$p
+        break
+      fi
+    done
     echo "[warn] Port 3000 busy by another app. Using :$DB_PORT"
   fi
 fi

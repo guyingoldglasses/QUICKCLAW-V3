@@ -10,9 +10,9 @@
     .card{background:#15171d;border:1px solid #2b2f39;border-radius:12px;padding:14px;margin:10px 0}
     .stat{font-size:12px;color:#a9afc0}.big{font-size:18px;font-weight:700}
     button{padding:8px 12px;border-radius:8px;border:1px solid #3a3f4d;background:#20242d;color:#fff;cursor:pointer}
-    button:hover{filter:brightness(1.1)}
-    pre{background:#0a0b0f;border:1px solid #2b2f39;padding:10px;border-radius:8px;max-height:260px;overflow:auto;white-space:pre-wrap}
-    .row{display:flex;gap:8px;flex-wrap:wrap}
+    input{padding:8px;border-radius:8px;border:1px solid #3a3f4d;background:#20242d;color:#fff}
+    .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+    pre{background:#0a0b0f;border:1px solid #2b2f39;padding:10px;border-radius:8px;max-height:240px;overflow:auto;white-space:pre-wrap}
     .ok{color:#7bed9f}.bad{color:#ff6b6b}.muted{color:#97a0b6}
     .pill{display:inline-block;padding:3px 8px;border:1px solid #36405a;border-radius:999px;font-size:12px;margin-right:6px}
   </style>
@@ -33,107 +33,86 @@
       <button onclick="stopGw()">Stop Gateway</button>
       <button onclick="restartGw()">Restart Gateway</button>
       <button onclick="refreshAll()">Refresh</button>
-      <button onclick="copyRoot()">Copy Root Path</button>
-      <button onclick="copyConfig()">Copy Config Path</button>
+      <button onclick="copyRoot()">Copy Root</button>
+      <button onclick="copyConfig()">Copy Config</button>
     </div>
   </div>
 
-  <div class="card">
-    <b>Add-ons status</b>
-    <div id="addons" style="margin-top:8px"></div>
-  </div>
+  <div class="card"><b>Add-ons status</b><div id="addons" style="margin-top:8px"></div></div>
+  <div class="card"><b>Gateway status details</b><pre id="gwStatusText"></pre></div>
 
   <div class="card">
-    <b>Gateway status details</b>
-    <pre id="gwStatusText"></pre>
-  </div>
-
-  <div class="card">
-    <b>Gateway Log</b>
+    <div class="row"><b>Profiles</b><span class="muted">(local)</span></div>
     <div class="row" style="margin:8px 0">
-      <button onclick="loadLog('gateway',50)">Last 50</button>
-      <button onclick="loadLog('gateway',200)">Last 200</button>
+      <select id="profilesSelect"></select>
+      <button onclick="activateSelectedProfile()">Set Active</button>
+      <input id="newProfileName" placeholder="new profile name">
+      <button onclick="createProfile()">Add Profile</button>
     </div>
-    <pre id="gwLog"></pre>
+    <div id="profilesList" class="muted"></div>
   </div>
 
   <div class="card">
-    <b>Dashboard Log</b>
-    <div class="row" style="margin:8px 0">
-      <button onclick="loadLog('dashboard',50)">Last 50</button>
-      <button onclick="loadLog('dashboard',200)">Last 200</button>
+    <b>Integration Settings (saved locally)</b>
+    <div class="grid" style="margin-top:8px">
+      <div><div class="stat">OpenAI Key</div><input id="openaiApiKey" placeholder="sk-..." style="width:100%"></div>
+      <div><div class="stat">Anthropic Key</div><input id="anthropicApiKey" placeholder="sk-ant-..." style="width:100%"></div>
+      <div><div class="stat">Telegram Bot Token</div><input id="telegramBotToken" placeholder="123:abc" style="width:100%"></div>
+      <div><div class="stat">FTP Host</div><input id="ftpHost" placeholder="ftp.example.com" style="width:100%"></div>
+      <div><div class="stat">FTP User</div><input id="ftpUser" placeholder="username" style="width:100%"></div>
+      <div><div class="stat">Email User</div><input id="emailUser" placeholder="you@example.com" style="width:100%"></div>
     </div>
-    <pre id="dbLog"></pre>
+    <div class="row" style="margin-top:8px"><button onclick="saveSettings()">Save Settings</button></div>
   </div>
 
-  <div class="card">
-    <b>Config Preview</b>
-    <pre id="cfg"></pre>
-  </div>
+  <div class="card"><b>Gateway Log</b><div class="row" style="margin:8px 0"><button onclick="loadLog('gateway',50)">Last 50</button><button onclick="loadLog('gateway',200)">Last 200</button></div><pre id="gwLog"></pre></div>
+  <div class="card"><b>Dashboard Log</b><div class="row" style="margin:8px 0"><button onclick="loadLog('dashboard',50)">Last 50</button><button onclick="loadLog('dashboard',200)">Last 200</button></div><pre id="dbLog"></pre></div>
+  <div class="card"><b>Config Preview</b><pre id="cfg"></pre></div>
 
 <script>
-let LAST = { root:'', config:'' };
+let LAST={root:'',config:''};
+const fields=['openaiApiKey','anthropicApiKey','telegramBotToken','ftpHost','ftpUser','emailUser'];
 
-async function j(u,o){ const r=await fetch(u,o); return r.json(); }
-async function txt(u){ const r=await fetch(u); return r.text(); }
-
-function addonPill(name, value){
-  const cls = value === 'missing' ? 'bad' : 'ok';
-  return `<span class="pill ${cls}">${name}: ${value}</span>`;
-}
+async function j(u,o){const r=await fetch(u,o);return r.json();}
+async function txt(u){const r=await fetch(u);return r.text();}
+function addonPill(name,val){const cls=val==='missing'?'bad':'ok';return `<span class="pill ${cls}">${name}: ${val}</span>`;}
 
 async function refreshStatus(){
-  const s = await j('/api/status');
-  LAST.root = s.root || '';
-  LAST.config = s.configPath || '';
-
-  document.getElementById('gwState').innerHTML = s.gateway.running ? '<span class="ok">RUNNING</span>' : '<span class="bad">STOPPED</span>';
-  document.getElementById('gwMeta').textContent = `WS 18789: ${s.gateway.ws18789 ? 'LISTENING' : 'NOT LISTENING'} | Port 5000: ${s.gateway.port5000 ? 'LISTENING' : 'NOT LISTENING'}`;
-
-  document.getElementById('dbState').innerHTML = '<span class="ok">RUNNING</span>';
-  document.getElementById('dbMeta').textContent = `PID: ${s.dashboard.pid || '-'} | Port: ${s.dashboard.port}`;
-
-  document.getElementById('rootPath').textContent = s.root || 'unknown';
-  document.getElementById('cfgState').textContent = `${s.configExists ? 'Found' : 'Missing'}: ${s.configPath || ''}`;
-
-  const a = s.addons || {};
-  document.getElementById('addons').innerHTML =
-    addonPill('openai', a.openai || 'missing') +
-    addonPill('anthropic', a.anthropic || 'missing') +
-    addonPill('telegram', a.telegram || 'missing') +
-    addonPill('ftp', a.ftp || 'missing') +
-    addonPill('email', a.email || 'missing');
-
-  document.getElementById('gwStatusText').textContent = s.gateway.statusText || '(no status text)';
+  const s=await j('/api/status'); LAST.root=s.root||''; LAST.config=s.configPath||'';
+  document.getElementById('gwState').innerHTML=s.gateway.running?'<span class="ok">RUNNING</span>':'<span class="bad">STOPPED</span>';
+  document.getElementById('gwMeta').textContent=`WS 18789: ${s.gateway.ws18789?'LISTENING':'NOT LISTENING'} | Port 5000: ${s.gateway.port5000?'LISTENING':'NOT LISTENING'}`;
+  document.getElementById('dbState').innerHTML='<span class="ok">RUNNING</span>';
+  document.getElementById('dbMeta').textContent=`PID: ${s.dashboard.pid||'-'} | Port: ${s.dashboard.port}`;
+  document.getElementById('rootPath').textContent=s.root||'unknown';
+  document.getElementById('cfgState').textContent=`${s.configExists?'Found':'Missing'}: ${s.configPath||''}`;
+  const a=s.addons||{};
+  document.getElementById('addons').innerHTML=addonPill('openai',a.openai||'missing')+addonPill('anthropic',a.anthropic||'missing')+addonPill('telegram',a.telegram||'missing')+addonPill('ftp',a.ftp||'missing')+addonPill('email',a.email||'missing');
+  document.getElementById('gwStatusText').textContent=s.gateway.statusText||'(no status text)';
 }
+async function loadLog(name,lines){const v=await txt(`/api/log/${name}?lines=${lines}`);document.getElementById(name==='gateway'?'gwLog':'dbLog').textContent=v||'(empty)';}
+async function loadConfig(){const c=await j('/api/config');document.getElementById('cfg').textContent=c.exists?c.content:'(config missing)';}
 
-async function loadLog(name, lines){
-  const v = await txt(`/api/log/${name}?lines=${lines}`);
-  if(name==='gateway') document.getElementById('gwLog').textContent = v || '(empty)';
-  else document.getElementById('dbLog').textContent = v || '(empty)';
+async function loadProfiles(){
+  const r=await j('/api/profiles'); const profiles=r.profiles||[];
+  const sel=document.getElementById('profilesSelect'); sel.innerHTML='';
+  let listTxt='';
+  profiles.forEach(p=>{const o=document.createElement('option');o.value=p.id;o.textContent=`${p.name}${p.active?' (active)':''}`; if(p.active)o.selected=true; sel.appendChild(o); listTxt += `${p.active?'*':'-'} ${p.name} [${p.id}]\n`;});
+  document.getElementById('profilesList').textContent=listTxt || '(none)';
 }
+async function createProfile(){const name=document.getElementById('newProfileName').value.trim(); if(!name)return; await j('/api/profiles',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})}); document.getElementById('newProfileName').value=''; await loadProfiles();}
+async function activateSelectedProfile(){const id=document.getElementById('profilesSelect').value; if(!id)return; await j('/api/profiles/activate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})}); await loadProfiles();}
 
-async function loadConfig(){
-  const c = await j('/api/config');
-  document.getElementById('cfg').textContent = c.exists ? c.content : '(config file missing)';
-}
+async function loadSettings(){const s=await j('/api/settings'); fields.forEach(f=>{const el=document.getElementById(f); if(el)el.value=s[f]||'';});}
+async function saveSettings(){const payload={}; fields.forEach(f=>payload[f]=document.getElementById(f).value||''); await j('/api/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});}
 
-async function startGw(){ await j('/api/gateway/start',{method:'POST'}); setTimeout(refreshAll, 900); }
-async function stopGw(){ await j('/api/gateway/stop',{method:'POST'}); setTimeout(refreshAll, 500); }
-async function restartGw(){ await j('/api/gateway/restart',{method:'POST'}); setTimeout(refreshAll, 1100); }
+async function startGw(){await j('/api/gateway/start',{method:'POST'});setTimeout(refreshAll,900);}
+async function stopGw(){await j('/api/gateway/stop',{method:'POST'});setTimeout(refreshAll,700);}
+async function restartGw(){await j('/api/gateway/restart',{method:'POST'});setTimeout(refreshAll,1200);}
+async function copyRoot(){if(LAST.root)await navigator.clipboard.writeText(LAST.root);}
+async function copyConfig(){if(LAST.config)await navigator.clipboard.writeText(LAST.config);}
 
-async function copyRoot(){ if(!LAST.root) return; await navigator.clipboard.writeText(LAST.root); }
-async function copyConfig(){ if(!LAST.config) return; await navigator.clipboard.writeText(LAST.config); }
-
-async function refreshAll(){
-  await refreshStatus();
-  await loadLog('gateway', 50);
-  await loadLog('dashboard', 50);
-  await loadConfig();
-}
-
-refreshAll();
-setInterval(refreshStatus, 5000);
+async function refreshAll(){await refreshStatus();await loadLog('gateway',50);await loadLog('dashboard',50);await loadConfig();await loadProfiles();await loadSettings();}
+refreshAll(); setInterval(refreshStatus,5000);
 </script>
 </body>
 </html>

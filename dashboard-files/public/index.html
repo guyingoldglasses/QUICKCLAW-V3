@@ -60,8 +60,24 @@ let currentTab='overview';
 const fields=['openaiApiKey','openaiOAuthEnabled','anthropicApiKey','telegramBotToken','ftpHost','ftpUser','emailUser'];
 
 const API_BASE = (location.protocol === 'http:' || location.protocol === 'https:') ? '' : 'http://localhost:3000';
-async function j(u,o){const r=await fetch(`${API_BASE}${u}`,o);return r.json();}
-async function txt(u){const r=await fetch(`${API_BASE}${u}`);return r.text();}
+function apiCandidates(u){
+  const list=[];
+  if(API_BASE) list.push(`${API_BASE}${u}`);
+  if(location.origin && location.origin !== 'null') list.push(`${location.origin}${u}`);
+  list.push(`http://localhost:3000${u}`);
+  list.push(`http://localhost:3001${u}`);
+  return [...new Set(list)];
+}
+async function fetchWithFallback(u,o){
+  let lastErr=null;
+  for(const url of apiCandidates(u)){
+    try{ return await fetch(url,o); }
+    catch(e){ lastErr=e; }
+  }
+  throw lastErr || new Error('API fetch failed');
+}
+async function j(u,o){const r=await fetchWithFallback(u,o);return r.json();}
+async function txt(u){const r=await fetchWithFallback(u);return r.text();}
 const esc=s=>String(s||'').replace(/[&<>]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[m]));
 function showToast(msg){const el=document.getElementById('toast'); el.textContent=msg; el.classList.remove('hidden'); setTimeout(()=>el.classList.add('hidden'),2400);}
 function showBanner(){
@@ -203,7 +219,7 @@ async function deleteProfile(){const id=document.getElementById('profilesSelect'
 async function saveSettings(){const payload={}; payload.openaiApiKey=document.getElementById('openaiApiKey')?.value||''; payload.openaiOAuthEnabled=!!document.getElementById('openaiOAuthEnabled')?.checked; payload.anthropicApiKey=document.getElementById('anthropicApiKey')?.value||''; payload.telegramBotToken=document.getElementById('telegramBotToken')?.value||''; payload.ftpHost=document.getElementById('ftpHost')?.value||''; payload.ftpUser=document.getElementById('ftpUser')?.value||''; payload.emailUser=document.getElementById('emailUser')?.value||''; await j('/api/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}); showToast('Settings saved');} 
 async function applySettingsToConfig(){const r=await j('/api/settings/apply-config',{method:'POST'}); await renderConfig(); await renderOverview(); showToast(r.backup?'Config applied + backup created':'Config applied');}
 async function importSettings(){try{const v=JSON.parse(document.getElementById('importJson').value||'{}'); await j('/api/settings/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(v)}); await renderIntegrations(); showToast('Settings imported');}catch(e){alert('Invalid JSON');}}
-function exportSettings(){ window.location = `${API_BASE}/api/settings/export`; }
+function exportSettings(){ window.location = apiCandidates('/api/settings/export')[0]; }
 
 async function installSkill(id){await j('/api/skills/install',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})}); await renderSkills();}
 async function toggleSkill(id,enabled){await j('/api/skills/toggle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,enabled})}); await renderSkills();}

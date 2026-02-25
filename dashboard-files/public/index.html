@@ -1,1 +1,132 @@
-<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>QuickClaw V3 Dashboard</title><style>body{font-family:system-ui;background:#0f1014;color:#eee;max-width:860px;margin:0 auto;padding:18px}.card{background:#15171d;border:1px solid #2b2f39;border-radius:12px;padding:14px;margin:10px 0}button{padding:8px 12px;border-radius:8px;border:1px solid #3a3f4d;background:#20242d;color:#fff;cursor:pointer}pre{background:#0a0b0f;border:1px solid #2b2f39;padding:10px;border-radius:8px;max-height:260px;overflow:auto;white-space:pre-wrap}</style></head><body><h2>QuickClaw V3 Dashboard</h2><div class="card"><div id="status">Loading status...</div><br><button onclick="startGw()">Start Gateway</button> <button onclick="stopGw()">Stop Gateway</button> <button onclick="refresh()">Refresh</button></div><div class="card"><b>Gateway Log</b><pre id="gw"></pre></div><div class="card"><b>Dashboard Log</b><pre id="db"></pre></div><script>async function j(u,o){const r=await fetch(u,o);return r.json()}async function t(u){const r=await fetch(u);return r.text()}async function refresh(){const s=await j('/api/status');document.getElementById('status').innerHTML=`Gateway: <b>${s.gateway.running?'RUNNING':'STOPPED'}</b> ${s.gateway.pid?`(PID ${s.gateway.pid})`:''}<br>Dashboard: RUNNING on ${location.origin}<br>Root: ${s.root}`;document.getElementById('gw').textContent=await t('/api/log/gateway');document.getElementById('db').textContent=await t('/api/log/dashboard')}async function startGw(){await j('/api/gateway/start',{method:'POST'});setTimeout(refresh,800)}async function stopGw(){await j('/api/gateway/stop',{method:'POST'});setTimeout(refresh,500)}refresh();setInterval(refresh,5000);</script></body></html>
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>QuickClaw V3 Dashboard</title>
+  <style>
+    body{font-family:system-ui;background:#0f1014;color:#eee;max-width:980px;margin:0 auto;padding:18px}
+    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}
+    .card{background:#15171d;border:1px solid #2b2f39;border-radius:12px;padding:14px;margin:10px 0}
+    .stat{font-size:12px;color:#a9afc0}.big{font-size:18px;font-weight:700}
+    button{padding:8px 12px;border-radius:8px;border:1px solid #3a3f4d;background:#20242d;color:#fff;cursor:pointer}
+    button:hover{filter:brightness(1.1)}
+    pre{background:#0a0b0f;border:1px solid #2b2f39;padding:10px;border-radius:8px;max-height:260px;overflow:auto;white-space:pre-wrap}
+    .row{display:flex;gap:8px;flex-wrap:wrap}
+    .ok{color:#7bed9f}.bad{color:#ff6b6b}.muted{color:#97a0b6}
+    .pill{display:inline-block;padding:3px 8px;border:1px solid #36405a;border-radius:999px;font-size:12px;margin-right:6px}
+  </style>
+</head>
+<body>
+  <h2>QuickClaw V3 Dashboard</h2>
+
+  <div class="card">
+    <div class="grid">
+      <div><div class="stat">Gateway</div><div id="gwState" class="big">...</div><div id="gwMeta" class="muted"></div></div>
+      <div><div class="stat">Dashboard</div><div id="dbState" class="big">...</div><div id="dbMeta" class="muted"></div></div>
+      <div><div class="stat">QuickClaw Root</div><div id="rootPath" class="muted">...</div></div>
+      <div><div class="stat">Config</div><div id="cfgState" class="muted">...</div></div>
+    </div>
+    <br>
+    <div class="row">
+      <button onclick="startGw()">Start Gateway</button>
+      <button onclick="stopGw()">Stop Gateway</button>
+      <button onclick="restartGw()">Restart Gateway</button>
+      <button onclick="refreshAll()">Refresh</button>
+      <button onclick="copyRoot()">Copy Root Path</button>
+      <button onclick="copyConfig()">Copy Config Path</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <b>Add-ons status</b>
+    <div id="addons" style="margin-top:8px"></div>
+  </div>
+
+  <div class="card">
+    <b>Gateway Log</b>
+    <div class="row" style="margin:8px 0">
+      <button onclick="loadLog('gateway',50)">Last 50</button>
+      <button onclick="loadLog('gateway',200)">Last 200</button>
+    </div>
+    <pre id="gwLog"></pre>
+  </div>
+
+  <div class="card">
+    <b>Dashboard Log</b>
+    <div class="row" style="margin:8px 0">
+      <button onclick="loadLog('dashboard',50)">Last 50</button>
+      <button onclick="loadLog('dashboard',200)">Last 200</button>
+    </div>
+    <pre id="dbLog"></pre>
+  </div>
+
+  <div class="card">
+    <b>Config Preview</b>
+    <pre id="cfg"></pre>
+  </div>
+
+<script>
+let LAST = { root:'', config:'' };
+
+async function j(u,o){ const r=await fetch(u,o); return r.json(); }
+async function txt(u){ const r=await fetch(u); return r.text(); }
+
+function addonPill(name, value){
+  const cls = value === 'missing' ? 'bad' : 'ok';
+  return `<span class="pill ${cls}">${name}: ${value}</span>`;
+}
+
+async function refreshStatus(){
+  const s = await j('/api/status');
+  LAST.root = s.root || '';
+  LAST.config = s.configPath || '';
+
+  document.getElementById('gwState').innerHTML = s.gateway.running ? '<span class="ok">RUNNING</span>' : '<span class="bad">STOPPED</span>';
+  document.getElementById('gwMeta').textContent = `PID: ${s.gateway.pid || '-'} | Port 5000: ${s.gateway.port5000 ? 'LISTENING' : 'NOT LISTENING'}`;
+
+  document.getElementById('dbState').innerHTML = '<span class="ok">RUNNING</span>';
+  document.getElementById('dbMeta').textContent = `PID: ${s.dashboard.pid || '-'} | Port: ${s.dashboard.port}`;
+
+  document.getElementById('rootPath').textContent = s.root || 'unknown';
+  document.getElementById('cfgState').textContent = `${s.configExists ? 'Found' : 'Missing'}: ${s.configPath || ''}`;
+
+  const a = s.addons || {};
+  document.getElementById('addons').innerHTML =
+    addonPill('openai', a.openai || 'missing') +
+    addonPill('anthropic', a.anthropic || 'missing') +
+    addonPill('telegram', a.telegram || 'missing') +
+    addonPill('ftp', a.ftp || 'missing') +
+    addonPill('email', a.email || 'missing');
+}
+
+async function loadLog(name, lines){
+  const v = await txt(`/api/log/${name}?lines=${lines}`);
+  if(name==='gateway') document.getElementById('gwLog').textContent = v || '(empty)';
+  else document.getElementById('dbLog').textContent = v || '(empty)';
+}
+
+async function loadConfig(){
+  const c = await j('/api/config');
+  document.getElementById('cfg').textContent = c.exists ? c.content : '(config file missing)';
+}
+
+async function startGw(){ await j('/api/gateway/start',{method:'POST'}); setTimeout(refreshAll, 900); }
+async function stopGw(){ await j('/api/gateway/stop',{method:'POST'}); setTimeout(refreshAll, 500); }
+async function restartGw(){ await j('/api/gateway/restart',{method:'POST'}); setTimeout(refreshAll, 1100); }
+
+async function copyRoot(){ if(!LAST.root) return; await navigator.clipboard.writeText(LAST.root); }
+async function copyConfig(){ if(!LAST.config) return; await navigator.clipboard.writeText(LAST.config); }
+
+async function refreshAll(){
+  await refreshStatus();
+  await loadLog('gateway', 50);
+  await loadLog('dashboard', 50);
+  await loadConfig();
+}
+
+refreshAll();
+setInterval(refreshStatus, 5000);
+</script>
+</body>
+</html>

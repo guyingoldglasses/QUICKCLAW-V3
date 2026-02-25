@@ -18,7 +18,7 @@ const SETTINGS_PATH = path.join(DATA_DIR, 'settings.json');
 for (const d of [PID_DIR, LOG_DIR, DATA_DIR]) if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
 
 app.use(express.static(path.join(__dirname, 'public')));
-app.use(express.json());
+app.use(express.json({ limit: '2mb' }));
 
 function run(cmd, opts = {}) {
   return new Promise((resolve) => {
@@ -76,6 +76,26 @@ function addonsStatus() {
   };
 }
 
+function applySettingsToConfigFile() {
+  const s = getSettings();
+  const lines = [
+    '# QuickClaw V3 generated config',
+    'gateway:',
+    '  mode: local',
+    '  port: 5000',
+    '  host: 127.0.0.1',
+    ''
+  ];
+  if (s.openaiApiKey) lines.push('openai:', `  api_key: "${s.openaiApiKey}"`, '');
+  if (s.anthropicApiKey) lines.push('anthropic:', `  api_key: "${s.anthropicApiKey}"`, '');
+  if (s.telegramBotToken) lines.push('telegram:', `  bot_token: "${s.telegramBotToken}"`, '');
+  if (s.ftpHost || s.ftpUser) lines.push('ftp:', ...(s.ftpHost ? [`  host: "${s.ftpHost}"`] : []), ...(s.ftpUser ? [`  user: "${s.ftpUser}"`] : []), '');
+  if (s.emailUser) lines.push('email:', `  user: "${s.emailUser}"`, '');
+  fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true });
+  fs.writeFileSync(CONFIG_PATH, lines.join('\n'));
+  return CONFIG_PATH;
+}
+
 app.get('/api/status', async (req, res) => {
   const gw = await gatewayState();
   res.json({
@@ -87,6 +107,15 @@ app.get('/api/status', async (req, res) => {
     configExists: fs.existsSync(CONFIG_PATH),
     addons: addonsStatus()
   });
+});
+
+app.get('/api/activity', async (req, res) => {
+  const gw = await gatewayState();
+  const events = [];
+  if (gw.running) events.push({ type: 'status', text: 'Gateway running', at: new Date().toISOString() });
+  const gwTail = tailFile('gateway.log', 40).split('\n').filter(Boolean).slice(-8).map(t => ({ type: 'gateway-log', text: t }));
+  const dbTail = tailFile('dashboard.log', 20).split('\n').filter(Boolean).slice(-5).map(t => ({ type: 'dashboard-log', text: t }));
+  res.json({ events: [...events, ...gwTail, ...dbTail] });
 });
 
 app.get('/api/log/:name', (req, res) => {
@@ -116,6 +145,10 @@ app.get('/api/config', (req, res) => {
   const exists = fs.existsSync(CONFIG_PATH);
   res.json({ exists, path: CONFIG_PATH, content: exists ? fs.readFileSync(CONFIG_PATH, 'utf8') : '' });
 });
+app.post('/api/settings/apply-config', (req, res) => {
+  const file = applySettingsToConfigFile();
+  res.json({ ok: true, message: 'Config regenerated from dashboard settings', path: file });
+});
 
 app.get('/api/profiles', (req, res) => res.json({ profiles: getProfiles() }));
 app.post('/api/profiles', (req, res) => {
@@ -134,6 +167,17 @@ app.post('/api/profiles/activate', (req, res) => {
 
 app.get('/api/settings', (req, res) => res.json(getSettings()));
 app.put('/api/settings', (req, res) => { saveSettings(req.body || {}); res.json({ ok: true, settings: getSettings() }); });
+app.get('/api/settings/export', (req, res) => {
+  const payload = { exportedAt: new Date().toISOString(), settings: getSettings() };
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Content-Disposition', 'attachment; filename="quickclaw-settings.json"');
+  res.send(JSON.stringify(payload, null, 2));
+});
+app.post('/api/settings/import', (req, res) => {
+  const incoming = req.body?.settings || req.body || {};
+  saveSettings(incoming);
+  res.json({ ok: true, settings: getSettings() });
+});
 
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 app.listen(PORT, () => console.log(`V3 dashboard at http://localhost:${PORT}`));

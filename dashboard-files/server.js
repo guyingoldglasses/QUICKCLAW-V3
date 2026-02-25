@@ -674,12 +674,12 @@ app.get('/api/profiles/:id/env', (req, res) => {
   const profileId = req.params.id;
   const varsObj = getProfileEnv(profileId);
   const reveal = String(req.query.reveal || '').toLowerCase() === 'true';
-  const vars = Object.entries(varsObj).map(([key, value]) => ({
-    key,
-    value: reveal ? String(value) : (String(value).length > 8 ? String(value).slice(0,4) + '••••' + String(value).slice(-2) : '••••'),
-    isSecret: true
-  }));
-  res.json({ vars });
+  const out = {};
+  for (const [key, value] of Object.entries(varsObj)) {
+    const raw = String(value ?? '');
+    out[key] = reveal ? raw : (raw.length > 8 ? raw.slice(0,4) + '••••' + raw.slice(-2) : (raw ? '••••' : ''));
+  }
+  res.json({ vars: out });
 });
 
 app.get('/api/profiles/:id/env/keys', (req, res) => {

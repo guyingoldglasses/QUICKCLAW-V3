@@ -5,22 +5,22 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>QuickClaw V3 Dashboard</title>
   <style>
-    :root{--bg:#0e1116;--card:#161b22;--line:#2d333b;--text:#e6edf3;--muted:#97a0b6;--ok:#3fb950;--bad:#f85149;--blue:#58a6ff}
-    *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font:14px/1.4 Inter,system-ui,sans-serif}
-    .wrap{max-width:1100px;margin:0 auto;padding:16px}
+    :root{--bg:#0e1116;--card:#161b22;--line:#2d333b;--text:#e6edf3;--muted:#97a0b6;--ok:#3fb950;--bad:#f85149}
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--text);font:14px/1.4 Inter,system-ui,sans-serif}
+    .wrap{max-width:1150px;margin:0 auto;padding:14px}
     .top{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
-    .tabs{display:flex;gap:8px;overflow:auto;padding-bottom:6px}
-    .tab{background:#101723;border:1px solid var(--line);color:var(--text);padding:8px 12px;border-radius:10px;cursor:pointer;white-space:nowrap}
+    .tabs{display:flex;gap:8px;overflow:auto;padding-bottom:6px;margin-top:10px}
+    .tab{background:#101723;border:1px solid var(--line);color:var(--text);padding:8px 11px;border-radius:10px;cursor:pointer;white-space:nowrap}
     .tab.active{border-color:#3d5fa8;color:#dce8ff}
     .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-top:12px}
-    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px}
+    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}
     .stat{font-size:12px;color:var(--muted)} .big{font-size:18px;font-weight:700}
     button,input,select,textarea{background:#0f141c;color:var(--text);border:1px solid var(--line);border-radius:8px;padding:8px}
-    button{cursor:pointer} button:hover{filter:brightness(1.1)}
+    button{cursor:pointer} button:hover{filter:brightness(1.08)}
     .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
     pre{background:#0a0f15;border:1px solid var(--line);border-radius:8px;padding:10px;max-height:280px;overflow:auto;white-space:pre-wrap}
-    .ok{color:var(--ok)} .bad{color:var(--bad)} .muted{color:var(--muted)}
-    .pill{display:inline-block;padding:3px 8px;border:1px solid #344054;border-radius:999px;font-size:12px;margin:0 6px 6px 0}
+    .ok{color:var(--ok)} .bad{color:var(--bad)} .muted{color:var(--muted)} .pill{display:inline-block;padding:3px 8px;border:1px solid #344054;border-radius:999px;font-size:12px;margin:0 6px 6px 0}
     .hidden{display:none}
     @media (max-width:700px){.wrap{padding:10px}.card{padding:12px}.top h2{font-size:18px}}
   </style>
@@ -41,6 +41,9 @@
   <section id="tab-overview" class="tabpane"></section>
   <section id="tab-profiles" class="tabpane hidden"></section>
   <section id="tab-integrations" class="tabpane hidden"></section>
+  <section id="tab-skills" class="tabpane hidden"></section>
+  <section id="tab-system" class="tabpane hidden"></section>
+  <section id="tab-security" class="tabpane hidden"></section>
   <section id="tab-logs" class="tabpane hidden"></section>
   <section id="tab-config" class="tabpane hidden"></section>
   <section id="tab-activity" class="tabpane hidden"></section>
@@ -48,9 +51,9 @@
 
 <script>
 let LAST={root:'',config:''};
-const tabs=['overview','profiles','integrations','logs','config','activity'];
+const tabs=['overview','profiles','integrations','skills','system','security','logs','config','activity'];
 let currentTab='overview';
-const fields=['openaiApiKey','anthropicApiKey','telegramBotToken','ftpHost','ftpUser','emailUser'];
+const fields=['openaiApiKey','openaiOAuthEnabled','anthropicApiKey','telegramBotToken','ftpHost','ftpUser','emailUser'];
 
 async function j(u,o){const r=await fetch(u,o);return r.json();}
 async function txt(u){const r=await fetch(u);return r.text();}
@@ -58,8 +61,7 @@ const esc=s=>String(s||'').replace(/[&<>]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt
 function addonPill(name,val){const c=val==='missing'?'bad':'ok';return `<span class="pill ${c}">${name}: ${val}</span>`;}
 
 function renderTabs(){
-  const el=document.getElementById('tabs');
-  el.innerHTML=tabs.map(t=>`<button class="tab ${t===currentTab?'active':''}" onclick="setTab('${t}')">${t[0].toUpperCase()+t.slice(1)}</button>`).join('');
+  document.getElementById('tabs').innerHTML=tabs.map(t=>`<button class="tab ${t===currentTab?'active':''}" onclick="setTab('${t}')">${t[0].toUpperCase()+t.slice(1)}</button>`).join('');
 }
 function setTab(tab){currentTab=tab; renderTabs(); tabs.forEach(t=>document.getElementById('tab-'+t).classList.toggle('hidden',t!==tab));}
 
@@ -83,16 +85,26 @@ async function renderOverview(){
 
 async function renderProfiles(){
   const r=await j('/api/profiles'); const profiles=r.profiles||[];
+  const options=profiles.map(p=>`<option value="${p.id}" ${p.active?'selected':''}>${esc(p.name)}${p.active?' (active)':''}</option>`).join('');
+  const list=profiles.map(p=>`${p.active?'*':'-'} ${p.name} [${p.id}] | created ${p.createdAt||'-'} | last used ${p.lastUsedAt||'-'}`).join('\n')||'(none)';
   document.getElementById('tab-profiles').innerHTML=`
-    <div class="card"><div class="row"><input id="newProfileName" placeholder="Profile name"><button onclick="createProfile()">Add Profile</button><select id="profilesSelect">${profiles.map(p=>`<option value="${p.id}" ${p.active?'selected':''}>${esc(p.name)}${p.active?' (active)':''}</option>`).join('')}</select><button onclick="activateSelectedProfile()">Set Active</button></div></div>
-    <div class="card"><b>All Profiles</b><pre>${esc(profiles.map(p=>`${p.active?'*':'-'} ${p.name} [${p.id}]`).join('\n')||'(none)')}</pre></div>`;
+    <div class="card"><div class="row"><input id="newProfileName" placeholder="Profile name"><input id="newProfileNotes" placeholder="notes (optional)"><button onclick="createProfile()">Add Profile</button></div></div>
+    <div class="card"><div class="row"><select id="profilesSelect">${options}</select><button onclick="activateSelectedProfile()">Set Active</button><input id="renameProfileName" placeholder="new name"><button onclick="renameProfile()">Rename</button><button onclick="deleteProfile()">Delete</button></div></div>
+    <div class="card"><b>All Profiles</b><pre>${esc(list)}</pre></div>`;
 }
 
 async function renderIntegrations(){
   const s=await j('/api/settings');
+  const oauthChecked=s.openaiOAuthEnabled?'checked':'';
   document.getElementById('tab-integrations').innerHTML=`
     <div class="card"><b>Integration Settings (local storage)</b><div class="grid" style="margin-top:10px">
-      ${fields.map(f=>`<div><div class="stat">${f}</div><input id="${f}" value="${esc(s[f]||'')}" style="width:100%"></div>`).join('')}
+      <div><div class="stat">OpenAI API Key</div><input id="openaiApiKey" value="${esc(s.openaiApiKey||'')}" style="width:100%"></div>
+      <div><div class="stat">OpenAI OAuth Mode</div><label class="row"><input id="openaiOAuthEnabled" type="checkbox" ${oauthChecked}>Enable OAuth-style mode flag</label></div>
+      <div><div class="stat">Anthropic API Key</div><input id="anthropicApiKey" value="${esc(s.anthropicApiKey||'')}" style="width:100%"></div>
+      <div><div class="stat">Telegram Bot Token</div><input id="telegramBotToken" value="${esc(s.telegramBotToken||'')}" style="width:100%"></div>
+      <div><div class="stat">FTP Host</div><input id="ftpHost" value="${esc(s.ftpHost||'')}" style="width:100%"></div>
+      <div><div class="stat">FTP User</div><input id="ftpUser" value="${esc(s.ftpUser||'')}" style="width:100%"></div>
+      <div><div class="stat">Email User</div><input id="emailUser" value="${esc(s.emailUser||'')}" style="width:100%"></div>
     </div>
     <div class="row" style="margin-top:10px">
       <button onclick="saveSettings()">Save Settings</button>
@@ -105,6 +117,31 @@ async function renderIntegrations(){
     </div>`;
 }
 
+async function renderSkills(){
+  const r=await j('/api/skills'); const skills=r.skills||[];
+  const rows=skills.map(s=>`<div class="card"><div class="row"><b>${esc(s.name)}</b><span class="pill">risk: ${esc(s.risk||'n/a')}</span><span class="pill">installed: ${s.installed?'yes':'no'}</span><span class="pill">enabled: ${s.enabled?'yes':'no'}</span></div><div class="row" style="margin-top:8px"><button onclick="installSkill('${s.id}')">Install</button><button onclick="toggleSkill('${s.id}', ${!s.enabled})">${s.enabled?'Disable':'Enable'}</button></div></div>`).join('');
+  document.getElementById('tab-skills').innerHTML=`<div class="card"><b>Skills Manager</b><p class="muted">Local-mode skills toggles and install flags. Full runtime install hooks can be layered next.</p></div>${rows}`;
+}
+
+async function renderSystem(){
+  const b=await j('/api/system/browse');
+  const items=(b.items||[]).slice(0,120).map(i=>`<option value="${esc(i.path)}">${i.type==='dir'?'[DIR] ':'[FILE] '}${esc(i.name)}</option>`).join('');
+  document.getElementById('tab-system').innerHTML=`
+    <div class="card"><b>System Browser (safe: QuickClaw root only)</b>
+      <div class="row" style="margin-top:8px"><button onclick="reloadBrowse()">Reload</button><select id="browseSelect" style="min-width:300px">${items}</select><button onclick="readSelectedFile()">Read File</button></div>
+      <pre id="filePreview">Select a file and click Read File.</pre>
+    </div>`;
+}
+
+async function renderSecurity(){
+  const a=await j('/api/security/audit');
+  const upd=await j('/api/updates/cli');
+  const findings=(a.findings||[]).map(f=>`- [${f.level}] ${f.message}`).join('\n');
+  document.getElementById('tab-security').innerHTML=`
+    <div class="card"><b>Security Audit</b><div class="big">Score: ${a.score}</div><pre>${esc(findings||'(none)')}</pre><div class="row"><button onclick="securityFix()">Attempt Auto Fix</button></div></div>
+    <div class="card"><b>Updates</b><pre>${esc(JSON.stringify(upd,null,2))}</pre></div>`;
+}
+
 async function renderLogs(){
   const gw50=await txt('/api/log/gateway?lines=50');
   const db50=await txt('/api/log/dashboard?lines=50');
@@ -115,7 +152,10 @@ async function renderLogs(){
 
 async function renderConfig(){
   const c=await j('/api/config');
-  document.getElementById('tab-config').innerHTML=`<div class="card"><b>Config File</b><div class="muted">${esc(c.path||'')}</div><pre>${esc(c.content||'(missing)')}</pre></div>`;
+  const b=await j('/api/config/backups');
+  document.getElementById('tab-config').innerHTML=`
+    <div class="card"><b>Config File</b><div class="muted">${esc(c.path||'')}</div><pre>${esc(c.content||'(missing)')}</pre></div>
+    <div class="card"><b>Backups</b><div class="row"><select id="backupSelect">${(b.files||[]).map(f=>`<option value="${esc(f)}">${esc(f)}</option>`).join('')}</select><button onclick="restoreBackup()">Restore Selected Backup</button></div></div>`;
 }
 
 async function renderActivity(){
@@ -124,18 +164,31 @@ async function renderActivity(){
 }
 
 async function loadLogInto(id,url){document.getElementById(id).textContent=await txt(url);}
-async function startGw(){await j('/api/gateway/start',{method:'POST'});setTimeout(refreshAll,800);} 
-async function stopGw(){await j('/api/gateway/stop',{method:'POST'});setTimeout(refreshAll,800);} 
+async function startGw(){await j('/api/gateway/start',{method:'POST'});setTimeout(refreshAll,900);} 
+async function stopGw(){await j('/api/gateway/stop',{method:'POST'});setTimeout(refreshAll,900);} 
 async function restartGw(){await j('/api/gateway/restart',{method:'POST'});setTimeout(refreshAll,1200);} 
-async function createProfile(){const n=document.getElementById('newProfileName').value.trim(); if(!n)return; await j('/api/profiles',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n})}); await renderProfiles();}
-async function activateSelectedProfile(){const id=document.getElementById('profilesSelect').value; await j('/api/profiles/activate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})}); await renderProfiles();}
-async function saveSettings(){const payload={}; fields.forEach(f=>{const el=document.getElementById(f); payload[f]=el?el.value:''}); await j('/api/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});} 
+
+async function createProfile(){const n=document.getElementById('newProfileName')?.value?.trim(); const notes=document.getElementById('newProfileNotes')?.value||''; if(!n)return; await j('/api/profiles',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n,notes})}); await renderProfiles();}
+async function activateSelectedProfile(){const id=document.getElementById('profilesSelect')?.value; if(!id)return; await j('/api/profiles/activate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})}); await renderProfiles();}
+async function renameProfile(){const id=document.getElementById('profilesSelect')?.value; const name=document.getElementById('renameProfileName')?.value?.trim(); if(!id||!name)return; await j('/api/profiles/rename',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,name})}); await renderProfiles();}
+async function deleteProfile(){const id=document.getElementById('profilesSelect')?.value; if(!id)return; if(!confirm('Delete selected profile?'))return; await j('/api/profiles/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})}); await renderProfiles();}
+
+async function saveSettings(){const payload={}; payload.openaiApiKey=document.getElementById('openaiApiKey')?.value||''; payload.openaiOAuthEnabled=!!document.getElementById('openaiOAuthEnabled')?.checked; payload.anthropicApiKey=document.getElementById('anthropicApiKey')?.value||''; payload.telegramBotToken=document.getElementById('telegramBotToken')?.value||''; payload.ftpHost=document.getElementById('ftpHost')?.value||''; payload.ftpUser=document.getElementById('ftpUser')?.value||''; payload.emailUser=document.getElementById('emailUser')?.value||''; await j('/api/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});} 
 async function applySettingsToConfig(){await j('/api/settings/apply-config',{method:'POST'}); await renderConfig(); await renderOverview();}
 async function importSettings(){try{const v=JSON.parse(document.getElementById('importJson').value||'{}'); await j('/api/settings/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(v)}); await renderIntegrations();}catch(e){alert('Invalid JSON');}}
+
+async function installSkill(id){await j('/api/skills/install',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})}); await renderSkills();}
+async function toggleSkill(id,enabled){await j('/api/skills/toggle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,enabled})}); await renderSkills();}
+
+async function reloadBrowse(){await renderSystem();}
+async function readSelectedFile(){const p=document.getElementById('browseSelect')?.value; if(!p)return; const r=await j('/api/system/readfile?path='+encodeURIComponent(p)); document.getElementById('filePreview').textContent=r.ok?(r.content||'(empty)'):('Error: '+r.error);}
+async function restoreBackup(){const file=document.getElementById('backupSelect')?.value; if(!file)return; await j('/api/config/restore',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({file})}); await renderConfig();}
+async function securityFix(){const r=await j('/api/security/fix',{method:'POST'}); alert(r.message||'done'); await renderSecurity();}
+
 async function copyRoot(){if(LAST.root)await navigator.clipboard.writeText(LAST.root);} 
 async function copyConfig(){if(LAST.config)await navigator.clipboard.writeText(LAST.config);} 
 
-async function refreshAll(){await renderOverview();await renderProfiles();await renderIntegrations();await renderLogs();await renderConfig();await renderActivity();}
+async function refreshAll(){await renderOverview();await renderProfiles();await renderIntegrations();await renderSkills();await renderSystem();await renderSecurity();await renderLogs();await renderConfig();await renderActivity();}
 
 renderTabs(); setTab('overview'); refreshAll();
 </script>

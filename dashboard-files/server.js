@@ -14,8 +14,10 @@ const CONFIG_PATH = path.join(INSTALL_DIR, 'config', 'default.yaml');
 const LOCAL_OPENCLAW = path.join(INSTALL_DIR, 'node_modules', '.bin', 'openclaw');
 const PROFILES_PATH = path.join(DATA_DIR, 'profiles.json');
 const SETTINGS_PATH = path.join(DATA_DIR, 'settings.json');
+const SKILLS_PATH = path.join(DATA_DIR, 'skills.json');
+const CONFIG_BACKUPS_DIR = path.join(DATA_DIR, 'config-backups');
 
-for (const d of [PID_DIR, LOG_DIR, DATA_DIR]) if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
+for (const d of [PID_DIR, LOG_DIR, DATA_DIR, CONFIG_BACKUPS_DIR]) if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
 
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json({ limit: '2mb' }));
@@ -43,17 +45,39 @@ function gatewayStopCommand() { return `${cliBin()} gateway stop`; }
 function getProfiles() {
   const list = readJson(PROFILES_PATH, null);
   if (Array.isArray(list) && list.length) return list;
-  const starter = [{ id: 'default', name: 'Default', active: true, createdAt: new Date().toISOString() }];
+  const starter = [{ id: 'default', name: 'Default', active: true, notes: '', createdAt: new Date().toISOString(), lastUsedAt: new Date().toISOString() }];
   writeJson(PROFILES_PATH, starter);
   return starter;
 }
 function saveProfiles(list) { writeJson(PROFILES_PATH, list); }
+
 function getSettings() {
   return readJson(SETTINGS_PATH, {
-    openaiApiKey: '', anthropicApiKey: '', telegramBotToken: '', ftpHost: '', ftpUser: '', emailUser: ''
+    openaiApiKey: '',
+    openaiOAuthEnabled: false,
+    anthropicApiKey: '',
+    telegramBotToken: '',
+    ftpHost: '',
+    ftpUser: '',
+    emailUser: ''
   });
 }
 function saveSettings(s) { writeJson(SETTINGS_PATH, { ...getSettings(), ...s }); }
+
+function getSkills() {
+  const list = readJson(SKILLS_PATH, null);
+  if (Array.isArray(list)) return list;
+  const starter = [
+    { id: 'core-tools', name: 'Core Tools', enabled: true, installed: true, risk: 'low' },
+    { id: 'openai-auth', name: 'OpenAI Auth', enabled: false, installed: true, risk: 'medium' },
+    { id: 'ftp-deploy', name: 'FTP Deploy', enabled: false, installed: false, risk: 'medium' },
+    { id: 'email', name: 'Email', enabled: false, installed: false, risk: 'medium' },
+    { id: 'antfarm', name: 'Antfarm', enabled: false, installed: false, risk: 'medium' }
+  ];
+  writeJson(SKILLS_PATH, starter);
+  return starter;
+}
+function saveSkills(list) { writeJson(SKILLS_PATH, list); }
 
 async function gatewayState() {
   const ws18789 = portListeningSync(18789);
@@ -76,8 +100,17 @@ function addonsStatus() {
   };
 }
 
+function backupCurrentConfig() {
+  if (!fs.existsSync(CONFIG_PATH)) return null;
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const dst = path.join(CONFIG_BACKUPS_DIR, `default-${stamp}.yaml`);
+  fs.copyFileSync(CONFIG_PATH, dst);
+  return dst;
+}
+
 function applySettingsToConfigFile() {
   const s = getSettings();
+  const backup = backupCurrentConfig();
   const lines = [
     '# QuickClaw V3 generated config',
     'gateway:',
@@ -93,7 +126,14 @@ function applySettingsToConfigFile() {
   if (s.emailUser) lines.push('email:', `  user: "${s.emailUser}"`, '');
   fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true });
   fs.writeFileSync(CONFIG_PATH, lines.join('\n'));
-  return CONFIG_PATH;
+  return { path: CONFIG_PATH, backup };
+}
+
+function ensureWithinRoot(rawPath) {
+  const resolved = path.resolve(rawPath);
+  const base = path.resolve(ROOT);
+  if (resolved === base || resolved.startsWith(base + path.sep)) return resolved;
+  throw new Error('Path outside QuickClaw root is not allowed');
 }
 
 app.get('/api/status', async (req, res) => {
@@ -146,21 +186,48 @@ app.get('/api/config', (req, res) => {
   res.json({ exists, path: CONFIG_PATH, content: exists ? fs.readFileSync(CONFIG_PATH, 'utf8') : '' });
 });
 app.post('/api/settings/apply-config', (req, res) => {
-  const file = applySettingsToConfigFile();
-  res.json({ ok: true, message: 'Config regenerated from dashboard settings', path: file });
+  const out = applySettingsToConfigFile();
+  res.json({ ok: true, message: 'Config regenerated from dashboard settings', ...out });
+});
+app.get('/api/config/backups', (req, res) => {
+  const files = fs.readdirSync(CONFIG_BACKUPS_DIR).filter(f => f.endsWith('.yaml')).sort().reverse();
+  res.json({ files });
+});
+app.post('/api/config/restore', (req, res) => {
+  const file = req.body?.file;
+  if (!file) return res.status(400).json({ ok: false, error: 'Missing file' });
+  const src = path.join(CONFIG_BACKUPS_DIR, file);
+  if (!fs.existsSync(src)) return res.status(404).json({ ok: false, error: 'Backup not found' });
+  fs.copyFileSync(src, CONFIG_PATH);
+  res.json({ ok: true, message: 'Config restored', file });
 });
 
 app.get('/api/profiles', (req, res) => res.json({ profiles: getProfiles() }));
 app.post('/api/profiles', (req, res) => {
   const list = getProfiles();
   const id = `p-${Date.now()}`;
-  list.push({ id, name: req.body?.name || `Profile ${list.length + 1}`, active: false, createdAt: new Date().toISOString() });
+  list.push({ id, name: req.body?.name || `Profile ${list.length + 1}`, active: false, notes: req.body?.notes || '', createdAt: new Date().toISOString(), lastUsedAt: null });
   saveProfiles(list);
   res.json({ ok: true, profiles: list });
 });
 app.post('/api/profiles/activate', (req, res) => {
   const id = req.body?.id;
-  const list = getProfiles().map(p => ({ ...p, active: p.id === id }));
+  const now = new Date().toISOString();
+  const list = getProfiles().map(p => ({ ...p, active: p.id === id, lastUsedAt: p.id === id ? now : p.lastUsedAt }));
+  saveProfiles(list);
+  res.json({ ok: true, profiles: list });
+});
+app.post('/api/profiles/rename', (req, res) => {
+  const { id, name } = req.body || {};
+  const list = getProfiles().map(p => p.id === id ? { ...p, name: name || p.name } : p);
+  saveProfiles(list);
+  res.json({ ok: true, profiles: list });
+});
+app.post('/api/profiles/delete', (req, res) => {
+  const { id } = req.body || {};
+  let list = getProfiles().filter(p => p.id !== id);
+  if (!list.length) list = [{ id: 'default', name: 'Default', active: true, notes: '', createdAt: new Date().toISOString(), lastUsedAt: new Date().toISOString() }];
+  if (!list.some(p => p.active)) list[0].active = true;
   saveProfiles(list);
   res.json({ ok: true, profiles: list });
 });
@@ -177,6 +244,58 @@ app.post('/api/settings/import', (req, res) => {
   const incoming = req.body?.settings || req.body || {};
   saveSettings(incoming);
   res.json({ ok: true, settings: getSettings() });
+});
+
+app.get('/api/skills', (req, res) => res.json({ skills: getSkills() }));
+app.post('/api/skills/toggle', (req, res) => {
+  const { id, enabled } = req.body || {};
+  const list = getSkills().map(s => s.id === id ? { ...s, enabled: !!enabled } : s);
+  saveSkills(list);
+  res.json({ ok: true, skills: list });
+});
+app.post('/api/skills/install', (req, res) => {
+  const { id } = req.body || {};
+  const list = getSkills().map(s => s.id === id ? { ...s, installed: true } : s);
+  saveSkills(list);
+  res.json({ ok: true, skills: list });
+});
+
+app.get('/api/system/browse', (req, res) => {
+  try {
+    const dir = req.query.dir ? ensureWithinRoot(req.query.dir) : ROOT;
+    const items = fs.readdirSync(dir, { withFileTypes: true }).map(d => ({ name: d.name, path: path.join(dir, d.name), type: d.isDirectory() ? 'dir' : 'file' }));
+    res.json({ ok: true, dir, items });
+  } catch (e) { res.status(400).json({ ok: false, error: String(e.message || e) }); }
+});
+app.get('/api/system/readfile', (req, res) => {
+  try {
+    const p = ensureWithinRoot(req.query.path || '');
+    res.json({ ok: true, path: p, content: fs.readFileSync(p, 'utf8') });
+  } catch (e) { res.status(400).json({ ok: false, error: String(e.message || e) }); }
+});
+app.put('/api/system/writefile', (req, res) => {
+  try {
+    const p = ensureWithinRoot(req.body?.path || '');
+    fs.writeFileSync(p, req.body?.content || '', 'utf8');
+    res.json({ ok: true, path: p });
+  } catch (e) { res.status(400).json({ ok: false, error: String(e.message || e) }); }
+});
+
+app.get('/api/security/audit', async (req, res) => {
+  const gw = await gatewayState();
+  const findings = [];
+  if (!gw.running) findings.push({ level: 'warn', message: 'Gateway is not running.' });
+  if (!fs.existsSync(CONFIG_PATH)) findings.push({ level: 'warn', message: 'Config file missing.' });
+  findings.push({ level: 'info', message: 'Deep security automation is not enabled in local mode yet.' });
+  const score = findings.filter(f => f.level === 'warn').length ? 72 : 88;
+  res.json({ ok: true, score, findings });
+});
+app.post('/api/security/fix', (req, res) => {
+  res.json({ ok: false, message: 'Automatic security fixes are not yet enabled in local mode.' });
+});
+
+app.get('/api/updates/cli', (req, res) => {
+  res.json({ ok: true, current: 'quickclaw-v3', latest: 'quickclaw-v3', canUpgrade: false, message: 'Manual zip update flow currently enabled.' });
 });
 
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));

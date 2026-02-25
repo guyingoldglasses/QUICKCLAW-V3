@@ -102,6 +102,15 @@ function defaultSkillsCatalog() {
       risk: 'medium'
     },
     {
+      id: 'telegram-setup',
+      name: 'Telegram Setup',
+      description: 'Easy BotFather token setup and quick-connect to config.',
+      includes: ['token save', 'config apply', 'connection hints'],
+      enabled: false,
+      installed: false,
+      risk: 'low'
+    },
+    {
       id: 'email',
       name: 'Email Integration',
       description: 'Email account settings for notifications and outbound workflows.',
@@ -331,6 +340,37 @@ app.post('/api/openai/quick-enable', (req, res) => {
 
   const out = applySettingsToConfigFile();
   res.json({ ok: true, message: 'OpenAI quick-connect enabled', settings: getSettings(), backup: out.backup });
+});
+
+
+app.get('/api/openai/oauth/start', (req, res) => {
+  res.json({
+    ok: true,
+    mode: 'local-oauth-helper',
+    connectUrl: 'https://platform.openai.com/settings/organization/api-keys',
+    instructions: 'Generate an API key in your OpenAI account and paste it into Integrations tab, or toggle OAuth mode for future flow support.'
+  });
+});
+
+app.post('/api/telegram/quick-enable', (req, res) => {
+  const botToken = String(req.body?.botToken || '').trim();
+  if (!botToken || !botToken.includes(':')) {
+    return res.status(400).json({ ok: false, error: 'Invalid Telegram bot token format. Expected 123456:ABC...' });
+  }
+
+  saveSettings({ telegramBotToken: botToken });
+
+  const skills = getSkills().map(s => s.id === 'telegram-setup' ? { ...s, installed: true, enabled: true } : s);
+  saveSkills(skills);
+
+  const out = applySettingsToConfigFile();
+  res.json({
+    ok: true,
+    message: 'Telegram quick-connect enabled',
+    backup: out.backup,
+    botFather: 'https://t.me/BotFather',
+    next: 'Add your bot to chat and send /start'
+  });
 });
 
 app.get('/api/settings/export', (req, res) => {

@@ -164,6 +164,8 @@ async function renderIntegrations(){
     <div class="row" style="margin-top:10px">
       <button onclick="saveSettings()">Save Settings</button>
       <button onclick="quickConnectOpenAI()">Quick Connect OpenAI</button>
+      <button onclick="openOpenAIOAuthHelp()">OpenAI OAuth Help</button>
+      <button onclick="quickConnectTelegram()">Quick Connect Telegram</button>
       <button onclick="applySettingsToConfig()">Apply Settings To Config</button>
       <button onclick="exportSettings()">Export Settings</button>
     </div></div>
@@ -267,6 +269,71 @@ async function renderConfig(){
 async function renderActivity(){
   const a=await j('/api/activity');
   document.getElementById('tab-activity').innerHTML=`<div class="card"><b>Recent Activity</b><pre>${esc((a.events||[]).map(e=>e.text||JSON.stringify(e)).join('\n')||'(none)')}</pre></div>`;
+}
+
+async function quickConnectOpenAI(){
+  const apiKey=document.getElementById('openaiApiKey')?.value||'';
+  const oauth=!!document.getElementById('openaiOAuthEnabled')?.checked;
+  const r=await j('/api/openai/quick-enable',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({apiKey,oauth})});
+  showToast(r.ok ? 'OpenAI quick-connect enabled' : (r.error||'OpenAI connect failed'));
+  await renderOverview();
+}
+
+async function openOpenAIOAuthHelp(){
+  const r=await j('/api/openai/oauth/start');
+  if(r.connectUrl) window.open(r.connectUrl,'_blank');
+  showToast('Opened OpenAI setup page');
+}
+
+async function quickConnectTelegram(){
+  const botToken=document.getElementById('telegramBotToken')?.value||'';
+  const r=await j('/api/telegram/quick-enable',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({botToken})});
+  showToast(r.ok ? 'Telegram quick-connect enabled' : (r.error||'Telegram connect failed'));
+  await renderOverview();
+}
+
+async function runAntfarmTask(){
+  const task=document.getElementById('antfarmTask')?.value?.trim();
+  if(!task) return;
+  const r=await j('/api/antfarm/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task})});
+  showToast(r.ok ? 'Antfarm task queued' : 'Antfarm task failed');
+  await renderAntfarm();
+}
+
+async function loadMemoryFile(){
+  const p=document.getElementById('memorySelect')?.value;
+  if(!p) return;
+  const r=await j('/api/memory/file?path='+encodeURIComponent(p));
+  if(r.ok){ const box=document.getElementById('memoryContent'); if(box) box.value=r.content||''; }
+}
+
+async function saveMemoryFile(){
+  const p=document.getElementById('memorySelect')?.value;
+  if(!p) return;
+  const content=document.getElementById('memoryContent')?.value||'';
+  const r=await j('/api/memory/file',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:p,content})});
+  showToast(r.ok ? 'Memory saved' : 'Memory save failed');
+}
+
+async function createMemoryFile(){
+  const name=document.getElementById('newMemoryName')?.value?.trim();
+  if(!name) return;
+  const r=await j('/api/memory/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})});
+  if(r.ok){ showToast('Memory file created'); await renderMemory(); }
+  else showToast(r.error||'Create failed');
+}
+
+function exportMemory(){
+  window.location = apiCandidates('/api/memory/export')[0];
+}
+
+async function sendChat(){
+  const text=document.getElementById('chatInput')?.value?.trim();
+  if(!text) return;
+  const r=await j('/api/chat/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})});
+  showToast(r.ok ? 'Message sent' : 'Send failed');
+  const input=document.getElementById('chatInput'); if(input) input.value='';
+  await renderChat();
 }
 
 async function loadLogInto(id,url){document.getElementById(id).textContent=await txt(url);}

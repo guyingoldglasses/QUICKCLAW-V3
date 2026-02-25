@@ -249,6 +249,29 @@ async function startGw(){await j('/api/gateway/start',{method:'POST'});setTimeou
 async function stopGw(){await j('/api/gateway/stop',{method:'POST'});setTimeout(refreshAll,900);} 
 async function restartGw(){await j('/api/gateway/restart',{method:'POST'});setTimeout(refreshAll,1200);} 
 
+function loadProfileEditor(){
+  const sel=document.getElementById('profilesSelect');
+  if(!sel) return;
+  const id=sel.value;
+  j('/api/profiles').then(r=>{
+    const pp=(r.profiles||[]).find(x=>x.id===id);
+    if(!pp) return;
+    const n=document.getElementById('profileNotes'); if(n) n.value=pp.notes||'';
+    const so=document.getElementById('profileSoul'); if(so) so.value=pp.soul||'';
+    const mp=document.getElementById('profileMemoryPath'); if(mp) mp.value=pp.memoryPath||'';
+  }).catch(()=>{});
+}
+
+async function saveProfileDetails(){
+  const id=document.getElementById('profilesSelect')?.value; if(!id) return;
+  const notes=document.getElementById('profileNotes')?.value||'';
+  const soul=document.getElementById('profileSoul')?.value||'';
+  const memoryPath=document.getElementById('profileMemoryPath')?.value||'';
+  await j('/api/profiles/update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,notes,soul,memoryPath})});
+  showToast('Profile details saved');
+  await renderProfiles();
+}
+
 async function createProfile(){const n=document.getElementById('newProfileName')?.value?.trim(); const notes=document.getElementById('newProfileNotes')?.value||''; if(!n)return; await j('/api/profiles',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n,notes})}); await renderProfiles();}
 async function activateSelectedProfile(){const id=document.getElementById('profilesSelect')?.value; if(!id)return; await j('/api/profiles/activate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})}); await renderProfiles();}
 async function renameProfile(){const id=document.getElementById('profilesSelect')?.value; const name=document.getElementById('renameProfileName')?.value?.trim(); if(!id||!name)return; await j('/api/profiles/rename',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,name})}); await renderProfiles();}

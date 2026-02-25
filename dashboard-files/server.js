@@ -53,7 +53,7 @@ function gatewayStopCommand() { return `${cliBin()} gateway stop`; }
 function getProfiles() {
   const list = readJson(PROFILES_PATH, null);
   if (Array.isArray(list) && list.length) return list;
-  const starter = [{ id: 'default', name: 'Default', active: true, notes: '', soul: '', memoryPath: '', createdAt: new Date().toISOString(), lastUsedAt: new Date().toISOString() }];
+  const starter = [{ id: 'default', name: 'Default', active: true, status: 'running', port: 3000, notes: '', soul: '', memoryPath: '', createdAt: new Date().toISOString(), lastUsedAt: new Date().toISOString() }];
   writeJson(PROFILES_PATH, starter);
   return starter;
 }
@@ -278,18 +278,18 @@ app.post('/api/config/restore', (req, res) => {
   res.json({ ok: true, message: 'Config restored', file });
 });
 
-app.get('/api/profiles', (req, res) => res.json({ profiles: getProfiles() }));
+app.get('/api/profiles', (req, res) => { const profiles=getProfiles().map(p=>({ ...p, status: p.status || (p.active?'running':'stopped'), port: p.port || 3000 })); res.json({ profiles }); });
 app.post('/api/profiles', (req, res) => {
   const list = getProfiles();
   const id = `p-${Date.now()}`;
-  list.push({ id, name: req.body?.name || `Profile ${list.length + 1}`, active: false, notes: req.body?.notes || '', soul: req.body?.soul || '', memoryPath: req.body?.memoryPath || '', createdAt: new Date().toISOString(), lastUsedAt: null });
+  list.push({ id, name: req.body?.name || `Profile ${list.length + 1}`, active: false, status: 'stopped', port: 3000, notes: req.body?.notes || '', soul: req.body?.soul || '', memoryPath: req.body?.memoryPath || '', createdAt: new Date().toISOString(), lastUsedAt: null });
   saveProfiles(list);
   res.json({ ok: true, profiles: list });
 });
 app.post('/api/profiles/activate', (req, res) => {
   const id = req.body?.id;
   const now = new Date().toISOString();
-  const list = getProfiles().map(p => ({ ...p, active: p.id === id, lastUsedAt: p.id === id ? now : p.lastUsedAt }));
+  const list = getProfiles().map(p => ({ ...p, active: p.id === id, status: p.id === id ? 'running' : (p.status || 'stopped'), port: p.port || 3000, lastUsedAt: p.id === id ? now : p.lastUsedAt }));
   saveProfiles(list);
   res.json({ ok: true, profiles: list });
 });
@@ -316,7 +316,7 @@ app.post('/api/profiles/update', (req, res) => {
 app.post('/api/profiles/delete', (req, res) => {
   const { id } = req.body || {};
   let list = getProfiles().filter(p => p.id !== id);
-  if (!list.length) list = [{ id: 'default', name: 'Default', active: true, notes: '', createdAt: new Date().toISOString(), lastUsedAt: new Date().toISOString() }];
+  if (!list.length) list = [{ id: 'default', name: 'Default', active: true, status: 'running', port: 3000, notes: '', createdAt: new Date().toISOString(), lastUsedAt: new Date().toISOString() }];
   if (!list.some(p => p.active)) list[0].active = true;
   saveProfiles(list);
   res.json({ ok: true, profiles: list });
@@ -553,7 +553,7 @@ app.post('/api/chat/send', (req, res) => {
 
 // Compatibility endpoints for Command Center UI (local-mode safe stubs + aliases)
 app.get('/api/alerts', (req, res) => res.json({ alerts: [] }));
-app.get(['/api/profiles/', '/api/profiles'], (req, res) => res.json({ profiles: getProfiles() }));
+app.get(['/api/profiles/', '/api/profiles'], (req, res) => { const profiles=getProfiles().map(p=>({ ...p, status: p.status || (p.active?'running':'stopped'), port: p.port || 3000 })); res.json({ profiles }); });
 app.post('/api/profiles/wizard', (req, res) => {
   const name = String(req.body?.name || 'Wizard Profile');
   const list = getProfiles().map(p => ({ ...p, active: false }));

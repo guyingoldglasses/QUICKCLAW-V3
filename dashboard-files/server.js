@@ -2,6 +2,7 @@ const express = require('express');
 const { exec, execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 const app = express();
 const PORT = process.env.DASHBOARD_PORT || 3000;
@@ -152,6 +153,16 @@ function saveAntfarmRuns(runs) { writeJson(ANTFARM_RUNS_PATH, runs); }
 
 function getChatHistory() { return readJson(CHAT_HISTORY_PATH, []); }
 function saveChatHistory(rows) { writeJson(CHAT_HISTORY_PATH, rows); }
+
+
+function b64url(buf) {
+  return Buffer.from(buf).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+function makePkcePair() {
+  const verifier = b64url(crypto.randomBytes(32));
+  const challenge = b64url(crypto.createHash('sha256').update(verifier).digest());
+  return { verifier, challenge };
+}
 
 function getProfileEnvStore() { return readJson(PROFILE_ENV_PATH, {}); }
 function saveProfileEnvStore(store) { writeJson(PROFILE_ENV_PATH, store); }
@@ -863,52 +874,79 @@ app.post('/api/profiles/:id/auth/oauth/start', (req, res) => {
   const settings = getSettings();
   const clientId = String(req.body?.clientId || settings.openaiOAuthClientId || process.env.OPENAI_OAUTH_CLIENT_ID || '').trim();
 
-  // If client id exists, provide direct browser auth URL for callback paste flow.
   if (clientId) {
     const redirectUri = `http://localhost:${PORT}/oauth/callback`;
     const state = `quickclaw_${Date.now()}`;
-    const authUrl = `https://auth.openai.com/oauth/authorize?response_type=code&client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=openid%20profile%20email&state=${encodeURIComponent(state)}`;
-    saveSettings({ openaiOAuthClientId: clientId, openaiOAuthLastState: state });
-    return res.json({
-      success: true,
-      authUrl,
-      clientId,
-      callbackHint: 'After login, copy the full localhost callback URL and paste into Complete Connection.',
-      note: 'If browser auth fails, use helper mode (Terminal onboarding).'
-    });
+    const pkce = makePkcePair();
+    const authUrl = `https://auth0.openai.com/authorize?response_type=code&client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=openid%20profile%20email&state=${encodeURIComponent(state)}&code_challenge=${encodeURIComponent(pkce.challenge)}&code_challenge_method=S256`;
+    saveSettings({ openaiOAuthClientId: clientId, openaiOAuthLastState: state, openaiOAuthPkceVerifier: pkce.verifier, openaiOAuthRedirectUri: redirectUri });
+    return res.json({ success: true, authUrl, clientId, callbackHint: 'After login you will be redirected back to localhost and callback is auto-captured.' });
   }
 
-  // Fallback helper mode (Terminal) when no client id is configured.
   const authUrl = `http://localhost:${PORT}/oauth/start-codex?profile=${encodeURIComponent(profileId)}`;
-  return res.json({
-    success: true,
-    authUrl,
-    clientId: null,
-    callbackHint: 'No client id configured. Helper mode will launch onboarding in Terminal.',
-    note: 'Add OAuth Client ID to use browser callback mode.'
-  });
+  return res.json({ success: true, authUrl, clientId: null, callbackHint: 'No client id configured. Helper mode launches onboarding in Terminal.' });
 });
-app.post('/api/profiles/:id/auth/oauth/complete', (req, res) => {
+app.post('/api/profiles/:id/auth/oauth/complete', async (req, res) => {
   const callbackUrl = String(req.body?.callbackUrl || '').trim();
   if (!callbackUrl) return res.json({ success: false, error: 'Callback URL is required.' });
 
   try {
+    const settings = getSettings();
     const u = new URL(callbackUrl);
     const code = u.searchParams.get('code') || '';
     const state = u.searchParams.get('state') || '';
     if (!code) return res.json({ success: false, error: 'No authorization code found in callback URL.' });
+    if (settings.openaiOAuthLastState && state && settings.openaiOAuthLastState !== state) {
+      return res.json({ success: false, error: 'State mismatch. Restart OAuth.' });
+    }
 
-    saveSettings({
-      openaiOAuthEnabled: true,
-      openaiOAuthConnectedAt: new Date().toISOString(),
-      openaiOAuthLastCode: String(code).slice(0, 8),
-      openaiOAuthLastState: state || getSettings().openaiOAuthLastState || ''
-    });
+    // Best-effort token exchange with PKCE
+    let exchanged = false;
+    let exchangeError = null;
+    try {
+      const body = {
+        grant_type: 'authorization_code',
+        client_id: settings.openaiOAuthClientId,
+        code,
+        redirect_uri: settings.openaiOAuthRedirectUri || `http://localhost:${PORT}/oauth/callback`,
+        code_verifier: settings.openaiOAuthPkceVerifier || ''
+      };
+      const resp = await fetch('https://auth0.openai.com/oauth/token', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      if (resp.ok) {
+        const tok = await resp.json();
+        saveSettings({
+          openaiOAuthEnabled: true,
+          openaiOAuthConnectedAt: new Date().toISOString(),
+          openaiOAuthLastState: state || settings.openaiOAuthLastState || '',
+          openaiOAuthAccessToken: tok.access_token || '',
+          openaiOAuthRefreshToken: tok.refresh_token || '',
+          openaiOAuthExpiry: tok.expires_in ? new Date(Date.now() + Number(tok.expires_in) * 1000).toISOString() : null
+        });
+        exchanged = true;
+      } else {
+        exchangeError = `token exchange failed (${resp.status})`;
+      }
+    } catch (e) {
+      exchangeError = String(e.message || e);
+    }
+
+    if (!exchanged) {
+      saveSettings({
+        openaiOAuthEnabled: true,
+        openaiOAuthConnectedAt: new Date().toISOString(),
+        openaiOAuthLastCode: String(code).slice(0, 8),
+        openaiOAuthLastState: state || settings.openaiOAuthLastState || ''
+      });
+    }
 
     const skills = getSkills().map(x => x.id === 'openai-auth' ? { ...x, installed: true, enabled: true } : x);
     saveSkills(skills);
 
-    return res.json({ success: true, message: 'OAuth callback accepted. OpenAI Codex marked connected for this profile.' });
+    return res.json({ success: true, message: exchanged ? 'OAuth connected and token exchange succeeded.' : `OAuth callback accepted (${exchangeError || 'exchange deferred'})` });
   } catch (e) {
     return res.json({ success: false, error: 'Invalid callback URL format.' });
   }
@@ -1011,6 +1049,23 @@ app.get('/oauth/start-codex', (req, res) => {
   const q = new URLSearchParams({ oauth: 'codex', started: launched ? '1' : '0', profile });
   if (error) q.set('oauthError', error.slice(0, 240));
   return res.redirect(`/?${q.toString()}#auth`);
+});
+
+
+app.get('/oauth/callback', (req, res) => {
+  const code = String(req.query.code || '');
+  const state = String(req.query.state || '');
+  const err = String(req.query.error || '');
+  const desc = String(req.query.error_description || '');
+  const callbackUrl = `http://localhost:${PORT}/oauth/callback?` + new URLSearchParams(req.query).toString();
+
+  if (err) {
+    return res.redirect(`/?tab=auth&oauthError=${encodeURIComponent(err + (desc ? ': '+desc : ''))}`);
+  }
+
+  // Redirect back to dashboard with callback payload prefilled.
+  const q = new URLSearchParams({ tab: 'auth', oauthCallback: callbackUrl, oauthCode: code, oauthState: state });
+  return res.redirect('/?' + q.toString() + '#auth');
 });
 
 // API safety net: never return HTML for unknown /api routes (prevents client JSON parse failures)

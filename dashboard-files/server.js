@@ -1,5 +1,5 @@
 const express = require('express');
-const { exec } = require('child_process');
+const { exec, execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
@@ -10,26 +10,28 @@ const PID_DIR = path.join(ROOT, '.pids');
 const LOG_DIR = path.join(ROOT, 'logs');
 const INSTALL_DIR = path.join(ROOT, 'openclaw');
 const CONFIG_PATH = path.join(INSTALL_DIR, 'config', 'default.yaml');
+const LOCAL_OPENCLAW = path.join(INSTALL_DIR, 'node_modules', '.bin', 'openclaw');
 
 for (const d of [PID_DIR, LOG_DIR]) if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
 
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
 
-function readPid(name) {
-  try {
-    const pid = parseInt(fs.readFileSync(path.join(PID_DIR, `${name}.pid`), 'utf8').trim(), 10);
-    process.kill(pid, 0);
-    return pid;
-  } catch {
-    return null;
-  }
+function run(cmd, opts = {}) {
+  return new Promise((resolve) => {
+    exec(cmd, opts, (error, stdout, stderr) => {
+      resolve({ ok: !error, stdout: String(stdout || ''), stderr: String(stderr || ''), error: error ? String(error.message || error) : null });
+    });
+  });
 }
 
-function portListening(port) {
-  return new Promise((resolve) => {
-    exec(`lsof -ti tcp:${port}`, (err, out) => resolve(!err && !!String(out).trim()));
-  });
+function portListeningSync(port) {
+  try {
+    execSync(`lsof -ti tcp:${port}`, { stdio: 'pipe' });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function tailFile(logFile, lines = 120) {
@@ -40,10 +42,33 @@ function tailFile(logFile, lines = 120) {
   return arr.slice(-Math.max(lines, 1)).join('\n');
 }
 
-function gatewayCommand() {
-  const b = path.join(INSTALL_DIR, 'node_modules', '.bin', 'openclaw');
-  if (fs.existsSync(b)) return `"${b}" gateway start --allow-unconfigured`;
-  return 'npx openclaw gateway start --allow-unconfigured';
+function cliBin() {
+  if (fs.existsSync(LOCAL_OPENCLAW)) return `"${LOCAL_OPENCLAW}"`;
+  return 'npx openclaw';
+}
+
+function gatewayStartCommand() {
+  return `${cliBin()} gateway start --allow-unconfigured`;
+}
+
+function gatewayStopCommand() {
+  return `${cliBin()} gateway stop`;
+}
+
+async function gatewayState() {
+  const ws18789 = portListeningSync(18789);
+  const ws5000 = portListeningSync(5000);
+
+  const status = await run(`${cliBin()} gateway status`, { cwd: INSTALL_DIR });
+  const txt = `${status.stdout}\n${status.stderr}`;
+  const looksRunning = /Runtime:\s*running|listening on ws:\/\/127\.0\.0\.1:18789|gateway\s+running/i.test(txt);
+
+  return {
+    running: ws18789 || ws5000 || looksRunning,
+    ws18789,
+    port5000: ws5000,
+    statusText: txt.trim()
+  };
 }
 
 function addonsStatus() {
@@ -60,11 +85,10 @@ function addonsStatus() {
 }
 
 app.get('/api/status', async (req, res) => {
-  const gwPid = readPid('gateway');
-  const dbPid = readPid('dashboard') || process.pid;
+  const gw = await gatewayState();
   res.json({
-    gateway: { running: !!gwPid, pid: gwPid, port5000: await portListening(5000) },
-    dashboard: { running: true, pid: dbPid, port: Number(PORT), port3000: await portListening(3000), port3001: await portListening(3001) },
+    gateway: gw,
+    dashboard: { running: true, pid: process.pid, port: Number(PORT), port3000: portListeningSync(3000), port3001: portListeningSync(3001) },
     root: ROOT,
     installDir: INSTALL_DIR,
     configPath: CONFIG_PATH,
@@ -79,36 +103,25 @@ app.get('/api/log/:name', (req, res) => {
   res.type('text/plain').send(tailFile(name, lines));
 });
 
-app.post('/api/gateway/start', (req, res) => {
-  const cur = readPid('gateway');
-  if (cur) return res.json({ ok: true, message: 'already running', pid: cur });
-
-  const cmd = gatewayCommand();
-  const child = exec(`${cmd} >> "${path.join(LOG_DIR, 'gateway.log')}" 2>&1`, { cwd: INSTALL_DIR });
-  fs.writeFileSync(path.join(PID_DIR, 'gateway.pid'), String(child.pid));
-  child.unref();
-  res.json({ ok: true, message: 'gateway start requested', pid: child.pid, cmd });
+app.post('/api/gateway/start', async (req, res) => {
+  const cmd = gatewayStartCommand();
+  const result = await run(`${cmd} >> "${path.join(LOG_DIR, 'gateway.log')}" 2>&1`, { cwd: INSTALL_DIR });
+  const gw = await gatewayState();
+  res.json({ ok: gw.running, message: gw.running ? 'gateway running' : 'gateway start attempted', cmd, result, gateway: gw });
 });
 
-app.post('/api/gateway/stop', (req, res) => {
-  const pid = readPid('gateway');
-  if (!pid) return res.json({ ok: false, message: 'not running' });
-  try { process.kill(pid, 'SIGTERM'); } catch {}
-  try { fs.unlinkSync(path.join(PID_DIR, 'gateway.pid')); } catch {}
-  res.json({ ok: true, message: 'gateway stop requested', pid });
+app.post('/api/gateway/stop', async (req, res) => {
+  const cmd = gatewayStopCommand();
+  const result = await run(`${cmd} >> "${path.join(LOG_DIR, 'gateway.log')}" 2>&1`, { cwd: INSTALL_DIR });
+  const gw = await gatewayState();
+  res.json({ ok: !gw.running, message: !gw.running ? 'gateway stopped' : 'gateway stop attempted', cmd, result, gateway: gw });
 });
 
 app.post('/api/gateway/restart', async (req, res) => {
-  const pid = readPid('gateway');
-  if (pid) {
-    try { process.kill(pid, 'SIGTERM'); } catch {}
-    try { fs.unlinkSync(path.join(PID_DIR, 'gateway.pid')); } catch {}
-  }
-  const cmd = gatewayCommand();
-  const child = exec(`${cmd} >> "${path.join(LOG_DIR, 'gateway.log')}" 2>&1`, { cwd: INSTALL_DIR });
-  fs.writeFileSync(path.join(PID_DIR, 'gateway.pid'), String(child.pid));
-  child.unref();
-  res.json({ ok: true, message: 'gateway restart requested', pid: child.pid, cmd });
+  await run(`${gatewayStopCommand()} >> "${path.join(LOG_DIR, 'gateway.log')}" 2>&1`, { cwd: INSTALL_DIR });
+  await run(`${gatewayStartCommand()} >> "${path.join(LOG_DIR, 'gateway.log')}" 2>&1`, { cwd: INSTALL_DIR });
+  const gw = await gatewayState();
+  res.json({ ok: gw.running, message: gw.running ? 'gateway restarted' : 'gateway restart attempted', gateway: gw });
 });
 
 app.get('/api/config', (req, res) => {

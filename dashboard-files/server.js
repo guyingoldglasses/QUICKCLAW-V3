@@ -551,5 +551,98 @@ app.post('/api/chat/send', (req, res) => {
   res.json({ ok: true, reply, messages: rows.slice(-40) });
 });
 
+// Compatibility endpoints for Command Center UI (local-mode safe stubs + aliases)
+app.get('/api/alerts', (req, res) => res.json({ alerts: [] }));
+app.get(['/api/profiles/', '/api/profiles'], (req, res) => res.json({ profiles: getProfiles() }));
+app.post('/api/profiles/wizard', (req, res) => {
+  const name = String(req.body?.name || 'Wizard Profile');
+  const list = getProfiles().map(p => ({ ...p, active: false }));
+  const id = `p-${Date.now()}`;
+  list.push({ id, name, active: true, notes: '', soul: '', memoryPath: '', createdAt: new Date().toISOString(), lastUsedAt: new Date().toISOString() });
+  saveProfiles(list);
+  res.json({ ok: true, profile: list.find(p => p.id === id), profiles: list });
+});
+
+app.get('/api/system', async (req, res) => {
+  const gw = await gatewayState();
+  res.json({
+    quickclawRoot: ROOT,
+    installDir: INSTALL_DIR,
+    gateway: { running: gw.running, ws18789: gw.ws18789, port5000: gw.port5000 },
+    hostname: require('os').hostname(),
+    platform: process.platform
+  });
+});
+
+app.get(['/api/system/browse?dir=', '/api/system/browse'], (req, res) => {
+  try {
+    const dir = req.query.dir ? ensureWithinRoot(req.query.dir) : ROOT;
+    const items = fs.readdirSync(dir, { withFileTypes: true }).map(d => ({ name: d.name, path: path.join(dir, d.name), type: d.isDirectory() ? 'dir' : 'file' }));
+    res.json({ dir, items });
+  } catch (e) {
+    res.status(400).json({ error: String(e.message || e) });
+  }
+});
+app.get('/api/system/readfile', (req, res) => {
+  try {
+    const p = ensureWithinRoot(req.query.path || '');
+    res.json({ path: p, content: fs.readFileSync(p, 'utf8') });
+  } catch (e) { res.status(400).json({ error: String(e.message || e) }); }
+});
+app.put('/api/system/writefile', (req, res) => {
+  try {
+    const p = ensureWithinRoot(req.body?.path || '');
+    fs.writeFileSync(p, req.body?.content || '', 'utf8');
+    res.json({ ok: true, path: p });
+  } catch (e) { res.status(400).json({ error: String(e.message || e) }); }
+});
+
+app.get('/api/usage/all', (req, res) => res.json({ totalTokens: 0, totalCost: 0, sessions: 0, byModel: [] }));
+app.get('/api/updates/workspace/', (req, res) => res.json({ ok: true, items: [] }));
+app.get('/api/updates/workspace/:id', (req, res) => res.json({ ok: true, id: req.params.id, item: null }));
+app.post('/api/updates/cli/upgrade', (req, res) => res.json({ ok: false, message: 'Manual zip update flow currently enabled.' }));
+
+app.get(['/api/versions', '/api/versions/'], (req, res) => res.json({ versions: [{ id: 'current', label: 'Current local build' }] }));
+app.get('/api/versions/:id', (req, res) => res.json({ id: req.params.id, details: null }));
+app.post('/api/versions/snapshot', (req, res) => res.json({ ok: false, message: 'Snapshot feature not enabled in local mode yet.' }));
+
+app.get('/api/news', (req, res) => res.json({ items: [] }));
+app.get('/api/news/bookmarks', (req, res) => res.json({ items: [] }));
+app.get('/api/news/quality', (req, res) => res.json({ score: null, notes: [] }));
+app.post('/api/news/fetch', (req, res) => res.json({ ok: false, message: 'News fetch not configured in local mode.' }));
+app.post('/api/news/feedback', (req, res) => res.json({ ok: true }));
+app.put('/api/news/sources', (req, res) => res.json({ ok: true }));
+app.put('/api/news', (req, res) => res.json({ ok: true }));
+
+app.get('/api/antfarm/version', (req, res) => res.json({ version: 'local-stub', installed: true }));
+app.post('/api/antfarm/update', (req, res) => res.json({ ok: false, message: 'Antfarm update not enabled yet.' }));
+app.post('/api/antfarm/rollback', (req, res) => res.json({ ok: false, message: 'Antfarm rollback not enabled yet.' }));
+app.post('/api/antfarm/dashboard/start', (req, res) => res.json({ ok: false, message: 'Dedicated antfarm dashboard not enabled.' }));
+app.post('/api/antfarm/dashboard/stop', (req, res) => res.json({ ok: false, message: 'Dedicated antfarm dashboard not enabled.' }));
+
+app.get('/api/dashboard/files', (req, res) => {
+  const dir = path.join(__dirname, 'public');
+  const items = fs.readdirSync(dir, { withFileTypes: true }).map(d => ({ name: d.name, path: path.join(dir, d.name), type: d.isDirectory() ? 'dir' : 'file' }));
+  res.json({ dir, items });
+});
+app.get('/api/dashboard/file', (req, res) => {
+  try {
+    const p = path.resolve(req.query.path || '');
+    const base = path.resolve(path.join(__dirname, 'public'));
+    if (!(p === base || p.startsWith(base + path.sep))) throw new Error('Path outside dashboard public dir');
+    res.json({ path: p, content: fs.readFileSync(p, 'utf8') });
+  } catch (e) { res.status(400).json({ error: String(e.message || e) }); }
+});
+app.put('/api/dashboard/file', (req, res) => {
+  try {
+    const p = path.resolve(req.body?.path || '');
+    const base = path.resolve(path.join(__dirname, 'public'));
+    if (!(p === base || p.startsWith(base + path.sep))) throw new Error('Path outside dashboard public dir');
+    fs.writeFileSync(p, req.body?.content || '', 'utf8');
+    res.json({ ok: true, path: p });
+  } catch (e) { res.status(400).json({ error: String(e.message || e) }); }
+});
+app.post('/api/dashboard/restart', (req, res) => res.json({ ok: true, message: 'Restart via QuickClaw_Launch.command recommended.' }));
+
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 app.listen(PORT, () => console.log(`V3 dashboard at http://localhost:${PORT}`));

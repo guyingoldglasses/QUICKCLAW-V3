@@ -535,6 +535,15 @@ app.get('/api/memory/export', (req, res) => {
 
 
 
+
+app.get('/api/env/download-all', (req, res) => {
+  const st = getProfileEnvStore();
+  const payload = { exportedAt: new Date().toISOString(), profiles: st };
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Content-Disposition', 'attachment; filename="all-profile-env.json"');
+  res.send(JSON.stringify(payload, null, 2));
+});
+
 app.get('/api/chat/history', (req, res) => {
   res.json({ messages: getChatHistory().slice(-100) });
 });
@@ -671,6 +680,84 @@ app.get('/api/profiles/:id/env', (req, res) => {
     isSecret: true
   }));
   res.json({ vars });
+});
+
+app.get('/api/profiles/:id/env/keys', (req, res) => {
+  const varsObj = getProfileEnv(req.params.id);
+  res.json({ keys: Object.keys(varsObj) });
+});
+
+app.post('/api/profiles/:id/env/set', (req, res) => {
+  const profileId = req.params.id;
+  const key = String(req.body?.key || '').trim();
+  const value = String(req.body?.value ?? '');
+  if (!key) return res.status(400).json({ ok:false, error:'key is required' });
+  const st = getProfileEnvStore();
+  st[profileId] = st[profileId] || {};
+  st[profileId][key] = value;
+  saveProfileEnvStore(st);
+  res.json({ ok:true, key });
+});
+
+app.post('/api/profiles/:id/env/upload', (req, res) => {
+  const profileId = req.params.id;
+  const content = String(req.body?.content || '');
+  const merge = req.body?.merge !== false;
+  const st = getProfileEnvStore();
+  st[profileId] = merge ? (st[profileId] || {}) : {};
+  let keysAdded = 0;
+  for (const line of content.split(/\r?\n/)) {
+    const t = line.trim();
+    if (!t || t.startsWith('#') || !t.includes('=')) continue;
+    const idx = t.indexOf('=');
+    const k = t.slice(0, idx).trim();
+    const v = t.slice(idx + 1);
+    if (!k) continue;
+    st[profileId][k] = v;
+    keysAdded += 1;
+  }
+  saveProfileEnvStore(st);
+  res.json({ ok:true, keysAdded });
+});
+
+app.post('/api/profiles/:id/env/purge', (req, res) => {
+  const profileId = req.params.id;
+  const st = getProfileEnvStore();
+  const purged = Object.keys(st[profileId] || {});
+  st[profileId] = {};
+  saveProfileEnvStore(st);
+  res.json({ ok:true, purged });
+});
+
+app.post('/api/profiles/:id/env/:key/toggle', (req, res) => {
+  const profileId = req.params.id;
+  const key = String(req.params.key || '');
+  const enabled = !!req.body?.enabled;
+  const st = getProfileEnvStore();
+  st[profileId] = st[profileId] || {};
+  st[profileId][`${key}_DISABLED`] = enabled ? '' : 'true';
+  saveProfileEnvStore(st);
+  res.json({ ok:true, key, enabled });
+});
+
+app.delete('/api/profiles/:id/env/:key', (req, res) => {
+  const profileId = req.params.id;
+  const key = String(req.params.key || '');
+  const st = getProfileEnvStore();
+  if (st[profileId]) {
+    delete st[profileId][key];
+    delete st[profileId][`${key}_DISABLED`];
+  }
+  saveProfileEnvStore(st);
+  res.json({ ok:true });
+});
+
+app.get('/api/profiles/:id/env/download', (req, res) => {
+  const varsObj = getProfileEnv(req.params.id);
+  const lines = Object.entries(varsObj).map(([k,v]) => `${k}=${v}`);
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="${req.params.id}.env"`);
+  res.send(lines.join('\\n'));
 });
 
 app.put('/api/profiles/:id/env', (req, res) => {

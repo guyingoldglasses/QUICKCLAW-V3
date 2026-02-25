@@ -19,6 +19,12 @@ const CONFIG_BACKUPS_DIR = path.join(DATA_DIR, 'config-backups');
 
 for (const d of [PID_DIR, LOG_DIR, DATA_DIR, CONFIG_BACKUPS_DIR]) if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
 
+app.use((req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  next();
+});
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json({ limit: '2mb' }));
 
@@ -135,6 +141,8 @@ function ensureWithinRoot(rawPath) {
   if (resolved === base || resolved.startsWith(base + path.sep)) return resolved;
   throw new Error('Path outside QuickClaw root is not allowed');
 }
+
+app.get('/api/ping', (req, res) => res.json({ ok: true, ts: Date.now() }));
 
 app.get('/api/status', async (req, res) => {
   const gw = await gatewayState();
